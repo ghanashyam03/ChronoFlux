@@ -294,12 +294,12 @@ describe('Phase 1.1 — Correctness and Invariant Hardening', () => {
 
   describe('3. Leap-Second Semantics', () => {
     it('accepts authentic historical IERS leap second dates at UTC 23:59:60Z and clamps to :59', () => {
-      // 1972-06-30 leap second
+      // 1972-06-30 leap second: default compatible mode
       const ls1972 = Instant.fromISOString('1972-06-30T23:59:60Z');
       expect(ls1972.toISOString()).toBe('1972-06-30T23:59:59.000Z');
 
-      // 2016-12-31 leap second
-      const ls2016 = Instant.fromISOString('2016-12-31T23:59:60Z');
+      // 2016-12-31 leap second with explicit clamp policy
+      const ls2016 = Instant.fromISOString('2016-12-31T23:59:60Z', { leapSecondPolicy: 'clamp' });
       expect(ls2016.toISOString()).toBe('2016-12-31T23:59:59.000Z');
 
       // Preserves sub-second fraction when clamping
@@ -314,6 +314,9 @@ describe('Phase 1.1 — Correctness and Invariant Hardening', () => {
     it('rejects second 60 on non-leap-second calendar dates', () => {
       // 2026-11-02 was never an IERS leap second date
       expect(() => Instant.fromISOString('2026-11-02T23:59:60Z')).toThrow(RangeError);
+      expect(() =>
+        Instant.fromISOString('2026-11-02T23:59:60Z', { leapSecondPolicy: 'compatible' })
+      ).toThrow(RangeError);
 
       // 2023-06-30 was not a leap second date
       expect(() => Instant.fromISOString('2023-06-30T23:59:60Z')).toThrow(RangeError);
@@ -325,6 +328,9 @@ describe('Phase 1.1 — Correctness and Invariant Hardening', () => {
     it('rejects second 60 when accompanied by non-zero UTC offsets', () => {
       // Non-zero positive offset
       expect(() => Instant.fromISOString('1972-06-30T23:59:60+05:30')).toThrow(RangeError);
+      expect(() =>
+        Instant.fromISOString('1972-06-30T23:59:60+05:30', { leapSecondPolicy: 'compatible' })
+      ).toThrow(RangeError);
 
       // Non-zero negative offset
       expect(() => Instant.fromISOString('2016-12-31T23:59:60-05:00')).toThrow(RangeError);
@@ -340,6 +346,12 @@ describe('Phase 1.1 — Correctness and Invariant Hardening', () => {
 
       expect(() =>
         Instant.fromISOString('2016-12-31T23:59:60Z', { leapSecondPolicy: 'strict' })
+      ).toThrow(RangeError);
+    });
+
+    it('rejects unknown leap second policy with RangeError', () => {
+      expect(() =>
+        Instant.fromISOString('1972-06-30T23:59:60Z', { leapSecondPolicy: 'invalid_policy' as any })
       ).toThrow(RangeError);
     });
   });
@@ -437,6 +449,14 @@ describe('Phase 1.1 — Correctness and Invariant Hardening', () => {
       const F2 = new Interval(i0, i20);
       expect(F1.finishes(F2)).toBe(true);
       expect(F1.isFinishes(F2)).toBe(true);
+
+      // 13. equals / isEquals
+      const E1 = new Interval(i0, i10);
+      const E2 = new Interval(i0, i10);
+      expect(E1.relationTo(E2)).toBe('equals');
+      expect(E1.isEquals(E2)).toBe(true);
+      expect(E1.isEquals(B)).toBe(false);
+      expect(() => E1.isEquals({} as any)).toThrow(TypeError);
     });
   });
 
@@ -447,6 +467,76 @@ describe('Phase 1.1 — Correctness and Invariant Hardening', () => {
 
       const dNeg = Duration.fromSeconds('-5.000');
       expect(dNeg.nanoseconds).toBe(-5n * NANOSECONDS_PER_SECOND);
+    });
+
+    it('handles scientific notation in numbers and strings accurately', () => {
+      // Small JS number: 1e-8 seconds = 10 nanoseconds
+      const d1 = Duration.fromSeconds(1e-8, 'halfExpand');
+      expect(d1.nanoseconds).toBe(10n);
+
+      // JS number 0.00000001 (which formats natively as '1e-8')
+      const d2 = Duration.fromSeconds(0.00000001, 'halfExpand');
+      expect(d2.nanoseconds).toBe(10n);
+
+      // Instant with scientific number
+      const inst1 = Instant.fromEpochSeconds(1e-8, 'halfExpand');
+      expect(inst1.epochNanoseconds).toBe(10n);
+
+      // Scientific notation decimal strings
+      const dStr1 = Duration.fromSeconds('1e-8', 'halfExpand');
+      expect(dStr1.nanoseconds).toBe(10n);
+
+      // Integer scientific string requires no rounding mode
+      const dStr2 = Duration.fromSeconds('1e3');
+      expect(dStr2.nanoseconds).toBe(1000n * NANOSECONDS_PER_SECOND);
+
+      const dStr3 = Duration.fromSeconds('1.5e3');
+      expect(dStr3.nanoseconds).toBe(1500n * NANOSECONDS_PER_SECOND);
+
+      const dStr4 = Duration.fromSeconds('-1.5e-3', 'halfExpand');
+      // -1.5e-3 seconds = -0.0015 seconds = -1,500,000 ns
+      expect(dStr4.nanoseconds).toBe(-1_500_000n);
+
+      // Duration.multiply with scientific notation
+      const base = Duration.fromSeconds(1);
+      expect(base.multiply(1e-8, 'halfExpand').nanoseconds).toBe(10n);
+      expect(base.multiply('1e-8', 'halfExpand').nanoseconds).toBe(10n);
+      expect(base.multiply('1e3').nanoseconds).toBe(1000n * NANOSECONDS_PER_SECOND);
+    });
+
+    it('handles dot-only decimal strings without leading or trailing digits', () => {
+      // Leading dot: ".5"
+      const dLead = Duration.fromSeconds('.5', 'halfExpand');
+      expect(dLead.nanoseconds).toBe(500_000_000n);
+
+      // Trailing dot: "5."
+      const dTrail = Duration.fromSeconds('5.', 'trunc');
+      expect(dTrail.nanoseconds).toBe(5_000_000_000n);
+
+      // Negative leading dot: "-.5"
+      const dNegLead = Duration.fromSeconds('-.5', 'floor');
+      expect(dNegLead.nanoseconds).toBe(-500_000_000n);
+    });
+
+    it('parses high-precision ISO timestamps (>9 fractional digits) without error', () => {
+      // 12 fractional digits (picoseconds): nanosecond part is preserved
+      const inst = Instant.fromISOString('2026-11-02T12:00:00.123456789123Z');
+      expect(inst.epochNanoseconds % NANOSECONDS_PER_SECOND).toBe(123456789n);
+    });
+
+    it('forwards InstantParseOptions through Instant.fromJSON', () => {
+      // By default fromJSON uses compatible mode, clamping 1972 leap second
+      const instDefault = Instant.fromJSON('1972-06-30T23:59:60Z');
+      expect(instDefault.toISOString()).toBe('1972-06-30T23:59:59.000Z');
+
+      // Forwarding reject policy strictly rejects
+      expect(() =>
+        Instant.fromJSON('1972-06-30T23:59:60Z', { leapSecondPolicy: 'reject' })
+      ).toThrow(RangeError);
+
+      // Forwarding clamp policy clamps
+      const instClamp = Instant.fromJSON('1972-06-30T23:59:60Z', { leapSecondPolicy: 'clamp' });
+      expect(instClamp.toISOString()).toBe('1972-06-30T23:59:59.000Z');
     });
 
     it('validates invalid types and empty strings in numeric parser', () => {

@@ -3,7 +3,7 @@
  * Exact numerical input validation, safe integer checking, and fractional-unit rounding for ChronoFlux.
  */
 
-import { RoundingMode } from './types.js';
+import { LeapSecondPolicy, RoundingMode } from './types.js';
 
 /**
  * Validates that a rounding mode is recognized.
@@ -16,6 +16,20 @@ export function validateRoundingMode(roundingMode: unknown): asserts roundingMod
     roundingMode !== 'halfExpand'
   ) {
     throw new RangeError(`Unknown rounding mode: ${roundingMode}`);
+  }
+}
+
+/**
+ * Validates that a leap second policy is recognized.
+ */
+export function validateLeapSecondPolicy(policy: unknown): asserts policy is LeapSecondPolicy {
+  if (
+    policy !== 'reject' &&
+    policy !== 'strict' &&
+    policy !== 'compatible' &&
+    policy !== 'clamp'
+  ) {
+    throw new RangeError(`Unknown leap second policy: ${policy}`);
   }
 }
 
@@ -71,7 +85,68 @@ export function roundScaledDecimal(
 }
 
 /**
- * Parses and scales a decimal string (e.g. "1.5", "-0.000000001") by unitNanoseconds,
+ * Normalizes a decimal or scientific string (e.g. "1.5", "-0.005", "1e-8", ".5", "5.", "+1.5e3")
+ * into sign, integral whole BigInt, and fractional digit string without floating-point precision loss.
+ */
+export function normalizeDecimalString(
+  str: string,
+  paramName: string
+): { sign: 1n | -1n; whole: bigint; fracStr: string } {
+  const trimmed = str.trim();
+  if (trimmed.length === 0) {
+    throw new TypeError(`Invalid numeric string for ${paramName}: "${str}"`);
+  }
+
+  const match = /^([+-])?(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/.exec(trimmed);
+  if (!match) {
+    throw new TypeError(`Invalid numeric string for ${paramName}: "${str}"`);
+  }
+
+  const sign: 1n | -1n = match[1] === '-' ? -1n : 1n;
+  const wholeRaw = match[2] ?? '0';
+  const fracRaw = match[3] ?? match[4] ?? '';
+  const expStr = match[5];
+  const exp = expStr ? parseInt(expStr, 10) : 0;
+
+  let normWhole: string;
+  let normFrac: string;
+
+  if (exp === 0) {
+    normWhole = wholeRaw.replace(/^0+/, '') || '0';
+    normFrac = fracRaw;
+  } else if (exp > 0) {
+    if (exp <= fracRaw.length) {
+      normWhole = (wholeRaw + fracRaw.slice(0, exp)).replace(/^0+/, '') || '0';
+      normFrac = fracRaw.slice(exp);
+    } else {
+      normWhole = (wholeRaw + fracRaw + '0'.repeat(exp - fracRaw.length)).replace(/^0+/, '') || '0';
+      normFrac = '';
+    }
+  } else {
+    // exp < 0: shift decimal point to the left by |exp|
+    const shift = -exp;
+    const cleanWhole = wholeRaw.replace(/^0+/, '');
+    if (cleanWhole.length === 0) {
+      normWhole = '0';
+      normFrac = '0'.repeat(shift) + fracRaw;
+    } else if (shift < cleanWhole.length) {
+      normWhole = cleanWhole.slice(0, cleanWhole.length - shift);
+      normFrac = cleanWhole.slice(cleanWhole.length - shift) + fracRaw;
+    } else {
+      normWhole = '0';
+      normFrac = '0'.repeat(shift - cleanWhole.length) + cleanWhole + fracRaw;
+    }
+  }
+
+  return {
+    sign,
+    whole: BigInt(normWhole),
+    fracStr: normFrac,
+  };
+}
+
+/**
+ * Parses and scales a decimal or scientific string (e.g. "1.5", "-0.000000001", "1e-8") by unitNanoseconds,
  * applying the specified rounding mode if fractional parts remain.
  */
 export function roundDecimalStringToNanoseconds(
@@ -80,14 +155,7 @@ export function roundDecimalStringToNanoseconds(
   paramName: string,
   roundingMode: RoundingMode
 ): bigint {
-  const match = /^([+-])?(\d+)(?:\.(\d+))?$/.exec(str);
-  if (!match) {
-    throw new TypeError(`Invalid decimal string for ${paramName}: "${str}"`);
-  }
-
-  const sign = match[1] === '-' ? -1n : 1n;
-  const whole = BigInt(match[2]!);
-  const fracStr = match[3] ?? '';
+  const { sign, whole, fracStr } = normalizeDecimalString(str, paramName);
 
   if (fracStr.length === 0 || /^0+$/.test(fracStr)) {
     return sign * whole * unitNanoseconds;
@@ -107,14 +175,14 @@ export function roundDecimalStringToNanoseconds(
 }
 
 /**
- * Converts a numerical input (bigint, safe integer number, or decimal string) into exact integer nanoseconds.
+ * Converts a numerical input (bigint, safe integer number, or decimal/scientific string) into exact integer nanoseconds.
  *
  * Invariant Rules:
  * 1. BigInt: Always exact, no bounds restrictions beyond domain limits.
  * 2. Number: Must be a finite safe integer in [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER].
  *    Unsafe integers throw RangeError directing callers to use BigInt or decimal strings.
  *    Fractional numbers require an explicit RoundingMode; otherwise a RangeError is thrown.
- * 3. String: Decimal strings (integer or fractional). Fractional strings require an explicit RoundingMode.
+ * 3. String: Decimal or scientific strings (integer or fractional). Fractional strings require an explicit RoundingMode.
  *    Invalid non-numeric strings throw TypeError.
  */
 export function parseUnitToNanoseconds(
@@ -147,7 +215,7 @@ export function parseUnitToNanoseconds(
       );
     }
 
-    // Fractional number (e.g. 1.5)
+    // Fractional number (e.g. 1.5, 1e-8, 0.00000001)
     if (roundingMode === undefined) {
       throw new RangeError(
         `Fractional value ${val} for ${paramName} requires an explicit rounding policy ('trunc', 'floor', 'ceil', or 'halfExpand')`
@@ -163,28 +231,28 @@ export function parseUnitToNanoseconds(
       throw new TypeError(`Invalid numeric string for ${paramName}: "${val}"`);
     }
 
-    // Pure integer string
-    if (/^[+-]?\d+$/.test(trimmed)) {
-      return BigInt(trimmed) * unitNanoseconds;
+    const { sign, whole, fracStr } = normalizeDecimalString(trimmed, paramName);
+    if (fracStr.length === 0 || /^0+$/.test(fracStr)) {
+      return sign * whole * unitNanoseconds;
     }
 
-    // Decimal string
-    const match = /^([+-])?(\d+)\.(\d+)$/.exec(trimmed);
-    if (match) {
-      const fracStr = match[3]!;
-      if (/^0+$/.test(fracStr)) {
-        const sign = match[1] === '-' ? -1n : 1n;
-        return sign * BigInt(match[2]!) * unitNanoseconds;
-      }
-      if (roundingMode === undefined) {
-        throw new RangeError(
-          `Fractional value "${val}" for ${paramName} requires an explicit rounding policy ('trunc', 'floor', 'ceil', or 'halfExpand')`
-        );
-      }
-      return roundDecimalStringToNanoseconds(trimmed, unitNanoseconds, paramName, roundingMode);
+    if (roundingMode === undefined) {
+      throw new RangeError(
+        `Fractional value "${val}" for ${paramName} requires an explicit rounding policy ('trunc', 'floor', 'ceil', or 'halfExpand')`
+      );
     }
 
-    throw new TypeError(`Invalid numeric string for ${paramName}: "${val}"`);
+    const scale = BigInt(fracStr.length);
+    const frac = BigInt(fracStr);
+    const denom = 10n ** scale;
+
+    return roundScaledDecimal(
+      sign,
+      whole * unitNanoseconds,
+      frac * unitNanoseconds,
+      denom,
+      roundingMode
+    );
   }
 
   throw new TypeError(`${paramName} must be a number, bigint, or decimal string, received: ${typeof val}`);

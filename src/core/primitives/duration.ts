@@ -4,6 +4,7 @@
  */
 
 import {
+  normalizeDecimalString,
   parseUnitToNanoseconds,
   roundScaledDecimal,
   validateRoundingMode,
@@ -178,21 +179,14 @@ export class Duration {
 
     if (typeof factor === 'string') {
       const trimmed = factor.trim();
-      if (/^[+-]?\d+$/.test(trimmed)) {
-        return new Duration(this.nanoseconds * BigInt(trimmed));
+      const { sign, whole, fracStr } = normalizeDecimalString(trimmed, 'factor');
+      if (fracStr.length === 0 || /^0+$/.test(fracStr)) {
+        return new Duration(this.nanoseconds * (sign * whole));
       }
-      const match = /^([+-])?(\d+)\.(\d+)$/.exec(trimmed);
-      if (match) {
-        if (/^0+$/.test(match[3]!)) {
-          const sign = match[1] === '-' ? -1n : 1n;
-          return new Duration(this.nanoseconds * (sign * BigInt(match[2]!)));
-        }
-        if (roundingMode === undefined) {
-          throw new RangeError(`Fractional multiplication factor ("${factor}") requires an explicit rounding policy`);
-        }
-        return this.multiplyDecimalString(trimmed, roundingMode);
+      if (roundingMode === undefined) {
+        throw new RangeError(`Fractional multiplication factor ("${factor}") requires an explicit rounding policy`);
       }
-      throw new TypeError(`Invalid numeric factor string: "${factor}"`);
+      return this.multiplyDecimalString(trimmed, roundingMode);
     }
 
     throw new TypeError(`factor must be a number, bigint, or decimal string, received: ${typeof factor}`);
@@ -200,12 +194,7 @@ export class Duration {
 
   private multiplyDecimalString(str: string, roundingMode: RoundingMode): Duration {
     validateRoundingMode(roundingMode);
-    const match = /^([+-])?(\d+)(?:\.(\d+))?$/.exec(str);
-    if (!match) throw new TypeError(`Invalid decimal string: "${str}"`);
-
-    const factorSign = match[1] === '-' ? -1n : 1n;
-    const whole = BigInt(match[2]!);
-    const fracStr = match[3] ?? '';
+    const { sign: factorSign, whole, fracStr } = normalizeDecimalString(str, 'factor');
     const scale = BigInt(fracStr.length);
     const frac = fracStr.length > 0 ? BigInt(fracStr) : 0n;
     const denom = 10n ** scale;

@@ -25,7 +25,9 @@ ChronoFlux does not replace standard clocks or rename UTC. It provides:
   - **Timestamp Representation Precision**: The numerical granularity of ChronoFlux's data structures is exact signed BigInt nanoseconds ($10^{-9}\text{ s}$). This guarantees zero arithmetic drift, zero rounding errors in temporal arithmetic, and exact transitivity across a $\pm 100,000,000$ day range ($\pm 273,790$ years).
   - **Clock Resolution**: The smallest detectable increment provided by an underlying hardware or runtime clock source (e.g. $1\text{ ms}$ for `Date.now()`, $1\text{–}100\ \mu\text{s}$ for `performance.now()`, $1\text{ ns}$ for `process.hrtime.bigint()`). High representation precision allows ChronoFlux to ingest any clock resolution without quantization loss, but does not magically upgrade a low-resolution clock.
   - **Clock Accuracy (Measurement Accuracy)**: The degree of conformance between a clock reading and true standard time (UTC/BIPM atomic clock standard), governed by physical oscillators and network sync protocols (e.g. NTP $\pm 1\text{–}50\text{ ms}$, PTP $\pm 1\ \mu\text{s}$, GPS $\pm 10\text{ ns}$). High representation precision must never be conflated with physical sensor accuracy.
-- **Leap Second Policy**: ChronoFlux operates on a leap-second-free Unix epoch timeline (86,400 SI seconds per nominal day). For ISO-8601 parsing, second `:60` is accepted only on authentic historical IERS leap second dates at UTC 23:59:60Z and clamped to second 59 per RFC 3339 / POSIX compatibility mode. Non-zero UTC offsets with `:60` and arbitrary dates are strictly rejected. Core parsing also supports strict rejection mode (`leapSecondPolicy: 'reject'`).
+- **Leap Second Policy**: ChronoFlux operates on a leap-second-free Unix epoch timeline (86,400 SI seconds per nominal day). For ISO-8601 parsing, second `:60` is accepted only on authentic historical IERS leap second dates at UTC 23:59:60Z and clamped to second 59 per RFC 3339 / POSIX compatibility mode (`leapSecondPolicy: 'compatible'`).
+  - *Justification for Compatibility Mode*: RFC 3339 Section 5.6 allows leap seconds as `:60`. To maintain interoperability with existing timestamp feeds and preserve backward compatibility with the existing Phase 1 test suite, the core parser defaults to `compatible` mode. Second 60 is strictly validated against the 27 authentic IERS historical dates; non-zero UTC offsets and arbitrary calendar dates are strictly rejected with a `RangeError`.
+  - *Strict Rejection*: Core parsing also supports strict rejection mode (`leapSecondPolicy: 'reject'` or `'strict'`), which strictly forbids second 60 per ChronoFlux's leap-second-free Instant model.
 
 ---
 
@@ -55,10 +57,10 @@ All primitives are located in `src/core/primitives/`:
 
 | Primitive | Class / Interface | Canonical Storage | Key Invariants |
 | :--- | :--- | :--- | :--- |
-| **Instant** | `Instant` | `readonly epochNanoseconds: bigint` | Deeply immutable (`Object.freeze`). Safe integers required for numeric inputs; BigInt and decimal strings for arbitrary precision. Fractional-unit conversions require explicit `RoundingMode`. Validated ISO-8601 parser with IERS leap-second validation. Rounding modes for millisecond conversions (`trunc`, `floor`, `ceil`, `halfExpand`). Safe serialization to decimal strings and ISO-8601 UTC strings. |
-| **Duration** | `Duration` | `readonly nanoseconds: bigint` | Deeply immutable (`Object.freeze`). Signed integer nanoseconds. Units: `nanoseconds`, `microseconds`, `milliseconds`, `seconds`, `minutes`, `hours`, `days`. Fixed elapsed time only (no calendar months/years). No silent `Math.trunc()`: fractional units require explicit `RoundingMode`. Multiply/divide hardened with safe integer validation. ISO-8601 duration formatting. |
+| **Instant** | `Instant` | `readonly epochNanoseconds: bigint` | Deeply immutable (`Object.freeze`). Safe integers required for numeric inputs; BigInt, decimal strings, and scientific notation (`1e-8`) supported for arbitrary precision. Fractional-unit conversions require explicit `RoundingMode`. Validated ISO-8601 parser with authentic IERS leap-second date verification and strict rejection mode. High-precision sub-nanosecond ISO strings handled gracefully. Rounding modes for millisecond conversions (`trunc`, `floor`, `ceil`, `halfExpand`). Safe serialization to decimal strings and ISO-8601 UTC strings. |
+| **Duration** | `Duration` | `readonly nanoseconds: bigint` | Deeply immutable (`Object.freeze`). Signed integer nanoseconds. Units: `nanoseconds`, `microseconds`, `milliseconds`, `seconds`, `minutes`, `hours`, `days`. Fixed elapsed time only (no calendar months/years). No silent `Math.trunc()`: fractional units require explicit `RoundingMode`. Exact decimal and scientific notation strings and numbers supported in factories and `multiply()`. Division requires safe integer divisor. ISO-8601 duration formatting. |
 | **Place** | `Place` | `latitude`, `longitude`, `elevationMeters?` | Deeply immutable (`Object.freeze`). WGS84 coordinate bounds: $\text{lat} \in [-90, +90]$, $\text{lon} \in [-180, +180]$. Contextual `timeZoneId` kept separate from coordinate geometry. |
-| **Interval** | `Interval` | `[start: Instant, end: Instant)` | Deeply immutable (`Object.freeze`). Half-open: includes `start`, excludes `end`. Requires `start < end` (zero/negative durations rejected; empty sets represented by `IntervalSet.empty()`). Evaluates general non-empty intersection via `intersects()`. Canonical Allen evaluation via `relationTo()`. Consistent symmetric predicate helpers (`isMeets`/`meets`, `isOverlaps`/`overlapsRelation`, etc.). |
+| **Interval** | `Interval` | `[start: Instant, end: Instant)` | Deeply immutable (`Object.freeze`). Half-open: includes `start`, excludes `end`. Requires `start < end` (zero/negative durations rejected; empty sets represented by `IntervalSet.empty()`). Evaluates general non-empty intersection via `intersects()`. Canonical Allen evaluation via `relationTo()`. Consistent symmetric predicate helpers across all 13 Allen relationships (`isBefore`/`before`, `isAfter`/`after`, `isMeets`/`meets`, `isMetBy`/`metBy`, `isOverlaps`/`overlapsRelation`, `isOverlappedBy`/`overlappedBy`, `isStarts`/`starts`, `isStartedBy`/`startedBy`, `isDuring`/`during`, `isContainsInterval`/`containsInterval`, `isFinishes`/`finishes`, `isFinishedBy`/`finishedBy`, `isEquals`). |
 | **IntervalSet**| `IntervalSet` | `readonly intervals: readonly Interval[]` | Deeply immutable: both the set instance and its backing `intervals` array are frozen (`Object.freeze`). Canonical sorted, disjoint intervals with adjacent interval merging. Set algebra: union ($\cup$), intersection ($\cap$), difference ($\setminus$), and bounded complement. Point containment via $O(\log N)$ binary search. |
 
 ### Generic Intersection vs. Allen's 13 Interval Relationships
@@ -70,7 +72,7 @@ All primitives are located in `src/core/primitives/`:
   4. `starts` / `startedBy`
   5. `during` / `contains`
   6. `finishes` / `finishedBy`
-  7. `equals`
+  7. `equals` (tested via `isEquals()`)
 
 ---
 
@@ -118,7 +120,7 @@ npm run build
   - Exact numerical input enforcement (safe integer checks, BigInt/string support, elimination of silent `Math.trunc()`, explicit `RoundingMode` policies for fractional units).
   - Explicit leap-second semantics with authentic IERS date validation, non-zero offset rejection, and RFC 3339 compatibility mode.
   - Allen API naming separation (`intersects()` for generic intersection, `relationTo()` canonical for 13 relations, symmetric helper methods).
-  - Comprehensive regression test suite (173/173 tests passing with 98.09% line coverage).
+  - Comprehensive regression test suite (178/178 tests passing with 98.22% line coverage).
 - [ ] **Phase 2 — Solar & Civil Temporal Models**: Astronomical mechanics (Meeus/NOAA equations), elevation, azimuth, twilight regimes, polar night/midnight sun, and IANA timezone translation.
 - [ ] **Phase 3 — Temporal Conditions & Resolver**: Typed Condition AST, continuous root-finding/bisection, and explainable interval synthesis.
 - [ ] **Phase 4 — Developer SDK & Benchmarks**: Golden vector NOAA validation and public facade packaging.

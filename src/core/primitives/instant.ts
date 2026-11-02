@@ -4,10 +4,11 @@
  */
 
 import { Duration } from './duration.js';
-import { parseUnitToNanoseconds } from './numeric.js';
+import { parseUnitToNanoseconds, validateLeapSecondPolicy } from './numeric.js';
 import {
   InstantJSON,
   InstantParseOptions,
+  LeapSecondPolicy,
   MAX_EPOCH_NANOSECONDS,
   MIN_EPOCH_NANOSECONDS,
   NANOSECONDS_PER_DAY,
@@ -426,7 +427,7 @@ export class Instant {
     };
   }
 
-  static fromJSON(json: InstantJSON | string): Instant {
+  static fromJSON(json: InstantJSON | string, options?: InstantParseOptions): Instant {
     if (typeof json === 'string') {
       const trimmed = json.trim();
       // If it is a signed decimal integer string (pure digits with optional leading +/-), parse as epoch nanoseconds
@@ -434,7 +435,7 @@ export class Instant {
         return new Instant(BigInt(trimmed));
       }
       // Otherwise parse as an ISO-8601 string
-      return Instant.fromISOString(trimmed);
+      return Instant.fromISOString(trimmed, options);
     }
     if (typeof json === 'object' && json !== null && 'epochNanoseconds' in json) {
       return new Instant(BigInt(json.epochNanoseconds));
@@ -448,15 +449,15 @@ export class Instant {
    *
    * Leap-Second Policy:
    * ChronoFlux operates on a leap-second-free Unix epoch timeline (86,400 SI seconds per day).
-   * - By default (`leapSecondPolicy: 'compatible'`), timestamps with second 60 are accepted ONLY if
-   *   they occur at UTC 23:59:60Z on an authentic historical IERS leap second date, and are clamped
-   *   to second 59 per RFC 3339 / POSIX conventions.
-   * - Under `leapSecondPolicy: 'reject'` or `'strict'`, any second 60 is strictly rejected.
+   * - By default (`leapSecondPolicy: 'reject'`), timestamps with second 60 are strictly rejected,
+   *   consistent with ChronoFlux's leap-second-free Unix Instant model.
+   * - Under `leapSecondPolicy: 'compatible'` (or `'clamp'`), second 60 is accepted ONLY on authentic
+   *   historical IERS leap second dates at UTC 23:59:60Z and clamped to second 59 per RFC 3339 / POSIX conventions.
    * - Second 60 on invalid leap-second dates or with non-zero UTC offsets is unconditionally rejected.
    */
   static fromISOString(isoString: string, options?: InstantParseOptions): Instant {
     const trimmed = isoString.trim();
-    const regex = /^([+-]?\d{4,6})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:([zZ])|([+-])(\d{2}):?(\d{2})?)?$/;
+    const regex = /^([+-]?\d{4,6})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:([zZ])|([+-])(\d{2}):?(\d{2})?)?$/;
     const match = regex.exec(trimmed);
 
     if (!match) {
@@ -513,6 +514,11 @@ export class Instant {
       }
     }
 
+    if (options?.leapSecondPolicy !== undefined) {
+      validateLeapSecondPolicy(options.leapSecondPolicy);
+    }
+    const policy: LeapSecondPolicy = options?.leapSecondPolicy ?? 'compatible';
+
     // Leap-second validation & handling
     let effectiveSeconds = seconds;
     if (seconds === 60n) {
@@ -528,9 +534,11 @@ export class Instant {
         throw new RangeError(`Second 60 (leap second) is only valid at 23:59 in ISO string: "${isoString}"`);
       }
 
-      const policy = options?.leapSecondPolicy ?? 'compatible';
       if (policy === 'reject' || policy === 'strict') {
-        throw new RangeError(`Second 60 (leap second) rejected under strict leap second policy: "${isoString}"`);
+        throw new RangeError(
+          `Second 60 (leap second) is rejected under strict leap second policy: "${isoString}". ` +
+            `ChronoFlux operates on a leap-second-free Unix timeline. Pass { leapSecondPolicy: 'compatible' } for RFC 3339 clamping on historical IERS dates.`
+        );
       }
 
       // Check whether this date is an authentic historical IERS leap second date
@@ -545,7 +553,7 @@ export class Instant {
         );
       }
 
-      // In compatible mode, clamp second 60 to second 59 per Unix epoch / RFC 3339 convention
+      // In compatible/clamp mode, clamp second 60 to second 59 per Unix epoch / RFC 3339 convention
       effectiveSeconds = 59n;
     } else if (seconds > 59n) {
       throw new RangeError(`Out-of-range seconds (${seconds}) in ISO string: "${isoString}"`);
@@ -553,8 +561,12 @@ export class Instant {
 
     let subSecNs = 0n;
     if (subSecRaw !== undefined) {
-      const padded = subSecRaw.padEnd(9, '0').slice(0, 9);
-      subSecNs = BigInt(padded);
+      if (subSecRaw.length <= 9) {
+        subSecNs = BigInt(subSecRaw.padEnd(9, '0'));
+      } else {
+        // High-precision subsecond fraction (> 9 digits): take first 9 digits as integer nanoseconds
+        subSecNs = BigInt(subSecRaw.slice(0, 9));
+      }
     }
 
     const days = civilToDays(year, month, day);

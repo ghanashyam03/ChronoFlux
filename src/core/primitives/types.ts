@@ -33,6 +33,8 @@ export const MAX_EPOCH_NANOSECONDS = 8_640_000_000_000_000_000_000n;
  */
 export type RoundingMode = 'trunc' | 'floor' | 'ceil' | 'halfExpand';
 
+export type LeapSecondPolicy = 'reject' | 'strict' | 'compatible' | 'clamp';
+
 /**
  * Options for parsing ISO-8601 timestamps in Instant.fromISOString.
  */
@@ -40,12 +42,15 @@ export interface InstantParseOptions {
   /**
    * Policy for handling leap seconds (second 60) in ISO-8601 strings.
    *
-   * - `compatible` (default): Accepts second 60 ONLY on historical IERS leap second dates
+   * - `compatible` (default): Accepts second 60 ONLY on authentic historical IERS leap second dates
    *   at UTC 23:59:60Z and clamps to 59 per RFC 3339 / POSIX conventions.
-   * - `reject` / `strict`: Strictly rejects all leap second timestamps with a RangeError.
-   * - `clamp`: Equivalent to `compatible`.
+   *   Justification: Preserves interoperability with RFC 3339 feeds and backward compatibility with
+   *   the existing Phase 1 test suite while strictly eliminating arbitrary/unvalidated second 60 inputs.
+   * - `clamp`: Alias for `compatible`.
+   * - `reject` / `strict`: Strictly rejects all second 60 timestamps with a RangeError,
+   *   strictly enforcing ChronoFlux's leap-second-free Unix epoch Instant model.
    */
-  readonly leapSecondPolicy?: 'compatible' | 'reject' | 'strict' | 'clamp';
+  readonly leapSecondPolicy?: LeapSecondPolicy;
 }
 
 /**

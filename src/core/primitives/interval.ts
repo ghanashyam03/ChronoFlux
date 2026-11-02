@@ -287,6 +287,11 @@ export class Interval {
     return this.isFinishedBy(other);
   }
 
+  isEquals(other: Interval): boolean {
+    if (!(other instanceof Interval)) throw new TypeError('Expected an Interval instance in Interval.isEquals');
+    return this.relationTo(other) === 'equals';
+  }
+
   // --- Serialization ---
 
   toJSON(): IntervalJSON {
