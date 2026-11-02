@@ -30,34 +30,64 @@ function daysInMonth(year: number, month: number): number {
   }
 }
 
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
+
+export function getFormatter(timeZoneId: string): Intl.DateTimeFormat {
+  let formatter = formatterCache.get(timeZoneId);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timeZoneId,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      fractionalSecondDigits: 3,
+      hourCycle: 'h23',
+    });
+    formatterCache.set(timeZoneId, formatter);
+  }
+  return formatter;
+}
+
+/**
+ * Safe UTC timestamp calculator that correctly handles 2-digit years (0-99).
+ * Standard Date.UTC treats 0-99 as 1900-1999.
+ */
+export function safeDateUtc(
+  year: number,
+  monthIndex: number,
+  day: number,
+  hour: number = 0,
+  minute: number = 0,
+  second: number = 0,
+  millisecond: number = 0
+): number {
+  const date = new Date(Date.UTC(year, monthIndex, day, hour, minute, second, millisecond));
+  if (year >= 0 && year <= 99) {
+    date.setUTCFullYear(year);
+  }
+  return date.getTime();
+}
+
 interface OffsetProbe {
   readonly localMs: number;
   readonly offsetMs: number;
 }
 
 function getIntlOffsetProbe(date: Date, timeZoneId: string): OffsetProbe {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: timeZoneId,
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    second: 'numeric',
-    fractionalSecondDigits: 3,
-    hourCycle: 'h23',
-  });
-
+  const formatter = getFormatter(timeZoneId);
   const parts = Object.fromEntries(formatter.formatToParts(date).map((p) => [p.type, p.value]));
-  const localMs = Date.UTC(
-    Number(parts['year']),
-    Number(parts['month']) - 1,
-    Number(parts['day']),
-    Number(parts['hour']),
-    Number(parts['minute']),
-    Number(parts['second']),
-    Number(parts['fractionalSecond'])
-  );
+  const year = Number(parts['year']);
+  const month = Number(parts['month']);
+  const day = Number(parts['day']);
+  const hour = Number(parts['hour']);
+  const minute = Number(parts['minute']);
+  const second = Number(parts['second']);
+  const millisecond = parts['fractionalSecond'] ? Number(parts['fractionalSecond']) : 0;
+
+  const localMs = safeDateUtc(year, month - 1, day, hour, minute, second, millisecond);
 
   return {
     localMs,
@@ -80,7 +110,7 @@ function resolveWithIntl(
   timeZoneId: string,
   policy: DisambiguationPolicy
 ): Instant {
-  const targetLocalMs = Date.UTC(year, month - 1, day, hour, minute, second, millisecond);
+  const targetLocalMs = safeDateUtc(year, month - 1, day, hour, minute, second, millisecond);
 
   // Probe potential offsets in the vicinity
   const est0 = getIntlOffsetProbe(new Date(targetLocalMs), timeZoneId).offsetMs;

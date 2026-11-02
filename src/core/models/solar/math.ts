@@ -453,12 +453,56 @@ export function findSolarCrossing(
   targetElevationDeg: number,
   direction: 'rising' | 'setting'
 ): Instant | null {
+  const phiRad = degToRad(place.latitude);
+  const cosPhi = Math.cos(phiRad);
+
+  // Polar singularity (|latitude| >= 89.99°): elevation is purely governed by seasonal declination delta(t).
+  if (Math.abs(cosPhi) < 1e-4) {
+    const noonCoords = computeSolarCoordinates(noon, place);
+    const noonElev = noonCoords.geometricElevationDeg;
+
+    // Check rate of change of elevation across 1 day
+    const tomorrowNs = noon.epochNanoseconds + 86_400_000_000_000n;
+    const tomorrowCoords = computeSolarCoordinates(Instant.fromEpochNanoseconds(tomorrowNs), place);
+    const dElevPerDay = tomorrowCoords.geometricElevationDeg - noonElev;
+
+    if (Math.abs(dElevPerDay) < 1e-6) {
+      return null;
+    }
+
+    const isRising = dElevPerDay > 0;
+    if ((direction === 'rising' && !isRising) || (direction === 'setting' && isRising)) {
+      return null;
+    }
+
+    const deltaElev = targetElevationDeg - noonElev;
+    const fractionOfDay = deltaElev / dElevPerDay;
+    if (fractionOfDay < -0.5 || fractionOfDay > 0.5) {
+      return null;
+    }
+
+    let currentNs = noon.epochNanoseconds + BigInt(Math.round(fractionOfDay * 86_400_000_000_000));
+    for (let iter = 0; iter < 5; iter++) {
+      const curInstant = Instant.fromEpochNanoseconds(currentNs);
+      const coords = computeSolarCoordinates(curInstant, place);
+      const errorDeg = coords.geometricElevationDeg - targetElevationDeg;
+      if (Math.abs(errorDeg) < 1e-5) {
+        break;
+      }
+      const dElevDt = dElevPerDay / 86400.0;
+      const rawCorrectionSec = -errorDeg / dElevDt;
+      const correctionSec = Math.max(-43200, Math.min(43200, rawCorrectionSec));
+      currentNs += BigInt(Math.round(correctionSec * 1_000_000_000));
+    }
+
+    return Instant.fromEpochNanoseconds(currentNs);
+  }
+
   const coordsNoon = computeSolarCoordinates(noon, place);
   const deltaRad = degToRad(coordsNoon.declinationDeg);
-  const phiRad = degToRad(place.latitude);
   const hTargetRad = degToRad(targetElevationDeg);
 
-  const cosH0 = (Math.sin(hTargetRad) - Math.sin(phiRad) * Math.sin(deltaRad)) / (Math.cos(phiRad) * Math.cos(deltaRad));
+  const cosH0 = (Math.sin(hTargetRad) - Math.sin(phiRad) * Math.sin(deltaRad)) / (cosPhi * Math.cos(deltaRad));
 
   // Check if crossing is geometrically impossible
   if (cosH0 > 1.0 || cosH0 < -1.0) {
@@ -471,23 +515,25 @@ export function findSolarCrossing(
   const sign = direction === 'rising' ? -1 : 1;
   let currentNs = noon.epochNanoseconds + BigInt(Math.round(sign * halfDaySec * 1_000_000_000));
 
-  // Refine crossing using bisection / secant root-finding
-  for (let iter = 0; iter < 4; iter++) {
+  // Refine crossing using Newton-Raphson root-finding
+  for (let iter = 0; iter < 5; iter++) {
     const curInstant = Instant.fromEpochNanoseconds(currentNs);
     const coords = computeSolarCoordinates(curInstant, place);
     const errorDeg = coords.geometricElevationDeg - targetElevationDeg;
     if (Math.abs(errorDeg) < 1e-5) {
       break;
     }
-    // Rate of change dh/dt ≈ cos(phi)*cos(delta)*sin(H) * (1/240 deg/sec)
+    // Rate of change dh/dt = -cos(phi)*cos(delta)*sin(H) / (cos(h) * 240 deg/sec)
     const curPhiRad = degToRad(place.latitude);
     const curDeltaRad = degToRad(coords.declinationDeg);
     const curHRad = degToRad(coords.hourAngleDeg);
-    let dhDt = -Math.cos(curPhiRad) * Math.cos(curDeltaRad) * Math.sin(curHRad) / 240.0;
+    const cosH = Math.max(0.01, Math.cos(degToRad(coords.geometricElevationDeg)));
+    let dhDt = (-Math.cos(curPhiRad) * Math.cos(curDeltaRad) * Math.sin(curHRad)) / (cosH * 240.0);
     if (Math.abs(dhDt) < 1e-6) {
       dhDt = direction === 'rising' ? 1.0 / 240.0 : -1.0 / 240.0;
     }
-    const correctionSec = -errorDeg / dhDt;
+    const rawCorrectionSec = -errorDeg / dhDt;
+    const correctionSec = Math.max(-7200, Math.min(7200, rawCorrectionSec));
     currentNs += BigInt(Math.round(correctionSec * 1_000_000_000));
   }
 

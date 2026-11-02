@@ -7,7 +7,7 @@ import { Duration } from '../../primitives/duration.js';
 import { Instant } from '../../primitives/instant.js';
 import { Place } from '../../primitives/place.js';
 import { ModelMetadata, TemporalModel } from '../model.js';
-import { resolveCivilDateTimeToInstant } from './disambiguation.js';
+import { getFormatter, safeDateUtc, resolveCivilDateTimeToInstant } from './disambiguation.js';
 import { CivilDateTimeInput, CivilState } from './types.js';
 
 export const CIVIL_MODEL_METADATA: ModelMetadata = Object.freeze({
@@ -35,19 +35,26 @@ interface LocalParts {
   readonly offsetMs: number;
 }
 
-function extractLocalParts(epochMs: number, timeZoneId: string): LocalParts {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: timeZoneId,
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    second: 'numeric',
-    fractionalSecondDigits: 3,
-    hourCycle: 'h23',
-  });
+/**
+ * Floor-divides epoch nanoseconds into integer milliseconds and sub-millisecond nanoseconds [0, 999999].
+ * Correctly handles negative nanoseconds (pre-1970).
+ */
+export function splitEpochNanoseconds(epochNs: bigint): { epochMs: number; nanosecond: number } {
+  const ONE_MS_NS = 1_000_000n;
+  let msBig = epochNs / ONE_MS_NS;
+  let rem = epochNs % ONE_MS_NS;
+  if (rem < 0n) {
+    msBig -= 1n;
+    rem += ONE_MS_NS;
+  }
+  return {
+    epochMs: Number(msBig),
+    nanosecond: Number(rem),
+  };
+}
 
+function extractLocalParts(epochMs: number, timeZoneId: string): LocalParts {
+  const formatter = getFormatter(timeZoneId);
   const parts = Object.fromEntries(
     formatter.formatToParts(new Date(epochMs)).map((p) => [p.type, p.value])
   );
@@ -58,9 +65,9 @@ function extractLocalParts(epochMs: number, timeZoneId: string): LocalParts {
   const hour = Number(parts['hour']);
   const minute = Number(parts['minute']);
   const second = Number(parts['second']);
-  const millisecond = Number(parts['fractionalSecond']);
+  const millisecond = parts['fractionalSecond'] ? Number(parts['fractionalSecond']) : 0;
 
-  const utcForCivil = Date.UTC(year, month - 1, day, hour, minute, second, millisecond);
+  const utcForCivil = safeDateUtc(year, month - 1, day, hour, minute, second, millisecond);
   const offsetMs = utcForCivil - epochMs;
 
   return {
@@ -75,14 +82,28 @@ function extractLocalParts(epochMs: number, timeZoneId: string): LocalParts {
   };
 }
 
+const standardOffsetCache = new Map<string, number>();
+
+function getStandardOffsetMs(timeZoneId: string, year: number): number {
+  const key = `${timeZoneId}:${year}`;
+  let std = standardOffsetCache.get(key);
+  if (std === undefined) {
+    const janMs = safeDateUtc(year, 0, 15, 12, 0, 0);
+    const julMs = safeDateUtc(year, 6, 15, 12, 0, 0);
+    const janOffset = extractLocalParts(janMs, timeZoneId).offsetMs;
+    const julOffset = extractLocalParts(julMs, timeZoneId).offsetMs;
+    std = Math.min(janOffset, julOffset);
+    standardOffsetCache.set(key, std);
+  }
+  return std;
+}
+
 /**
  * Evaluates whether Daylight Saving Time is actively in effect by comparing the current offset
  * against the minimum (standard) offset across seasonal solstices (Jan 15 and Jul 15) for that year.
  */
 function isDstActive(currentOffsetMs: number, timeZoneId: string, year: number): boolean {
-  const janOffset = extractLocalParts(Date.UTC(year, 0, 15, 12, 0, 0), timeZoneId).offsetMs;
-  const julOffset = extractLocalParts(Date.UTC(year, 6, 15, 12, 0, 0), timeZoneId).offsetMs;
-  const standardOffsetMs = Math.min(janOffset, julOffset);
+  const standardOffsetMs = getStandardOffsetMs(timeZoneId, year);
   return currentOffsetMs > standardOffsetMs;
 }
 
@@ -171,10 +192,7 @@ export class CivilModel implements TemporalModel<CivilState> {
       throw new RangeError(`Unknown or invalid IANA time zone identifier: '${cleanTz}'`);
     }
 
-    const epochNs = instant.epochNanoseconds;
-    const epochMs = Number(epochNs / 1_000_000n);
-    const subMsNs = Number(epochNs % 1_000_000n);
-    const nanosecond = subMsNs >= 0 ? subMsNs : 1_000_000 + subMsNs;
+    const { epochMs, nanosecond } = splitEpochNanoseconds(instant.epochNanoseconds);
 
     const local = extractLocalParts(epochMs, cleanTz);
     const isDaylightSaving = isDstActive(local.offsetMs, cleanTz, local.year);

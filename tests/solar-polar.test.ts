@@ -167,4 +167,83 @@ describe('Astronomical Solar Model — Polar Edge Cases', () => {
       }
     });
   });
+
+  describe('Polar Singularity (North & South Poles: ±90° Latitude)', () => {
+    const northPole = ChronoFlux.place({ latitude: 90.0, longitude: 0.0 });
+    const southPole = ChronoFlux.place({ latitude: -90.0, longitude: 0.0 });
+    const year2026Start = ChronoFlux.instant('2026-01-01T00:00:00Z');
+
+    it('finds annual vernal equinox sunrise and autumn equinox sunset at the North Pole', () => {
+      const sunrise = ChronoFlux.solar.nextEvent({
+        event: 'sunrise',
+        place: northPole,
+        after: year2026Start,
+        searchLimitDays: 365,
+      });
+
+      expect(sunrise).not.toBeNull();
+      // Vernal equinox sunrise occurs around March 18
+      const sunriseIso = sunrise!.toISOString();
+      expect(sunriseIso).toContain('2026-03-18');
+
+      const sunriseState = ChronoFlux.solar.evaluate(sunrise!, northPole);
+      expect(Math.abs(sunriseState.geometricElevationDeg - (-0.8333))).toBeLessThan(0.01);
+
+      const sunset = ChronoFlux.solar.nextEvent({
+        event: 'sunset',
+        place: northPole,
+        after: sunrise!,
+        searchLimitDays: 365,
+      });
+
+      expect(sunset).not.toBeNull();
+      // Autumn equinox sunset occurs around September 25
+      const sunsetIso = sunset!.toISOString();
+      expect(sunsetIso).toContain('2026-09-25');
+
+      const sunsetState = ChronoFlux.solar.evaluate(sunset!, northPole);
+      expect(Math.abs(sunsetState.geometricElevationDeg - (-0.8333))).toBeLessThan(0.01);
+    });
+
+    it('finds annual sunrise and sunset at the South Pole', () => {
+      const sunrise = ChronoFlux.solar.nextEvent({
+        event: 'sunrise',
+        place: southPole,
+        after: year2026Start,
+        searchLimitDays: 365,
+      });
+
+      expect(sunrise).not.toBeNull();
+      // South Pole sunrise occurs around September 20
+      expect(sunrise!.toISOString()).toContain('2026-09-20');
+
+      const sunset = ChronoFlux.solar.nextEvent({
+        event: 'sunset',
+        place: southPole,
+        after: year2026Start,
+        searchLimitDays: 365,
+      });
+
+      expect(sunset).not.toBeNull();
+      // South Pole sunset occurs around March 22
+      expect(sunset!.toISOString()).toContain('2026-03-22');
+    });
+
+    it('finds elevation transition boundaries across the year at the North Pole', () => {
+      const window = ChronoFlux.interval(
+        ChronoFlux.instant('2026-01-01T00:00:00Z'),
+        ChronoFlux.instant('2026-12-31T00:00:00Z')
+      );
+
+      const transitions = ChronoFlux.solar.findTransitions(
+        northPole,
+        window,
+        -0.8333333333333334
+      );
+
+      expect(transitions.length).toBe(2);
+      expect(transitions[0]!.toISOString()).toContain('2026-03-18');
+      expect(transitions[1]!.toISOString()).toContain('2026-09-25');
+    });
+  });
 });

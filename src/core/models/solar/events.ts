@@ -25,7 +25,7 @@ const ONE_DAY_NS = 86_400_000_000_000n;
 export function findNextSolarEvent(options: SolarEventOptions): Instant | null {
   const { event, place, after, searchLimitDays = 365 } = options;
 
-  if (searchLimitDays <= 0) {
+  if (searchLimitDays <= 0 || !Number.isFinite(searchLimitDays)) {
     return null;
   }
 
