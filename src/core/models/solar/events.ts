@@ -6,10 +6,12 @@
 import { Duration } from '../../primitives/duration.js';
 import { Instant } from '../../primitives/instant.js';
 import {
+  ASTRONOMICAL_TWILIGHT_ELEVATION_DEG,
   calcSolarMidnight,
   calcSolarNoon,
   CIVIL_TWILIGHT_ELEVATION_DEG,
   findSolarCrossing,
+  NAUTICAL_TWILIGHT_ELEVATION_DEG,
   NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
 } from './math.js';
 import { SolarEventOptions } from './types.js';
@@ -25,11 +27,12 @@ const ONE_DAY_NS = 86_400_000_000_000n;
 export function findNextSolarEvent(options: SolarEventOptions): Instant | null {
   const { event, place, after, searchLimitDays = 365 } = options;
 
-  if (searchLimitDays <= 0 || !Number.isFinite(searchLimitDays)) {
+  if (typeof searchLimitDays !== 'number' || !Number.isFinite(searchLimitDays) || searchLimitDays <= 0) {
     return null;
   }
 
-  const maxDuration = Duration.fromDays(searchLimitDays);
+  // Phase 1.1 numeric hardening: fractional searchLimitDays requires explicit RoundingMode
+  const maxDuration = Duration.fromDays(searchLimitDays, 'ceil');
   const maxInstant = after.add(maxDuration);
 
   // 1. Solar Noon: occurs every diurnal cycle
@@ -52,7 +55,7 @@ export function findNextSolarEvent(options: SolarEventOptions): Instant | null {
     return midnight.isBefore(maxInstant) || midnight.equals(maxInstant) ? midnight : null;
   }
 
-  // 3. Elevation crossings: sunrise, sunset, civilDawn, civilDusk
+  // 3. Elevation crossings: sunrise, sunset, civilDawn, civilDusk, nauticalDawn, nauticalDusk, astronomicalDawn, astronomicalDusk
   let targetAngleDeg: number;
   let direction: 'rising' | 'setting';
 
@@ -73,6 +76,24 @@ export function findNextSolarEvent(options: SolarEventOptions): Instant | null {
       targetAngleDeg = CIVIL_TWILIGHT_ELEVATION_DEG;
       direction = 'setting';
       break;
+    case 'nauticalDawn':
+      targetAngleDeg = NAUTICAL_TWILIGHT_ELEVATION_DEG;
+      direction = 'rising';
+      break;
+    case 'nauticalDusk':
+      targetAngleDeg = NAUTICAL_TWILIGHT_ELEVATION_DEG;
+      direction = 'setting';
+      break;
+    case 'astronomicalDawn':
+      targetAngleDeg = ASTRONOMICAL_TWILIGHT_ELEVATION_DEG;
+      direction = 'rising';
+      break;
+    case 'astronomicalDusk':
+      targetAngleDeg = ASTRONOMICAL_TWILIGHT_ELEVATION_DEG;
+      direction = 'setting';
+      break;
+    default:
+      return null;
   }
 
   const limitDaysInt = Math.ceil(searchLimitDays);

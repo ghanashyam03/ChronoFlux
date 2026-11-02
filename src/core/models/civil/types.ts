@@ -68,3 +68,28 @@ export interface CivilState {
   readonly isDaylightSaving: boolean;
   readonly transition?: CivilTransitionInfo;
 }
+
+/**
+ * Pluggable provider interface for geographic coordinate to IANA time zone resolution.
+ */
+export interface TimeZoneLookupProvider {
+  /**
+   * Resolves an IANA time zone identifier from geographic coordinates.
+   *
+   * @param latitude Latitude in degrees [-90, +90]
+   * @param longitude Longitude in degrees [-180, +180]
+   * @returns IANA time zone identifier string (e.g. 'America/New_York') or null if unmapped.
+   */
+  lookup(latitude: number, longitude: number): string | null;
+}
+
+/**
+ * Provenance of the underlying civil-time database and runtime environment.
+ */
+export interface CivilTimeProvenance {
+  readonly runtime: string;
+  readonly tzVersion: string;
+  readonly icuVersion: string;
+  readonly cldrVersion: string;
+  readonly unicodeVersion: string;
+}

@@ -39,13 +39,20 @@ ChronoFlux provides a mathematically rigorous, high-resolution temporal foundati
 
 ### 6. Astronomical Solar Model (Jean Meeus / NOAA)
 - **High-Precision Equations**: Julian centuries ($T$), geometric mean anomaly, sun equation of center, apparent longitude, right ascension, declination ($\delta$), and equation of time ($EoT$).
-- **Refraction & Angles**: Saemundsson / Bennett atmospheric refraction correction, apparent and geometric elevation ($h \in [-90^\circ, +90^\circ]$), solar zenith angle ($90^\circ - h$), and solar azimuth angle ($[0^\circ, 360^\circ)$ clockwise from North).
-- **Solar Regimes**: Direct sunlight ($\ge -0.833^\circ$), Civil twilight ($[-6^\circ, -0.833^\circ)$), Nautical twilight ($[-12^\circ, -6^\circ)$), Astronomical twilight ($[-18^\circ, -12^\circ)$), and Night ($< -18^\circ$).
-- **Polar Edge Cases**: Graceful classification of Polar Day (Midnight Sun) and Polar Night in high latitudes (e.g. Tromsø $69.65^\circ$N and Svalbard $78.22^\circ$N) with zero NaN errors or exceptions.
-- **Event Locator**: Discrete event search via `ChronoFlux.solar.nextEvent` (`sunrise`, `sunset`, `solarNoon`, `solarMidnight`, `civilDawn`, `civilDusk`) and boundary transition solving via `findTransitions`.
+- **Refraction & Angles**: Saemundsson / Bennett atmospheric refraction correction, apparent ($h_{\text{app}}$) and geometric ($h_{\text{geom}} \in [-90^\circ, +90^\circ]$) elevation, solar zenith angle ($90^\circ - h$), and solar azimuth angle ($[0^\circ, 360^\circ)$ clockwise from North, with explicit `null` and `isAzimuthIndeterminate` at zenith, nadir, and geographic poles).
+- **Harmonized Geometric Semantics**: Direct sunlight ($\ge -0.8333^\circ$), Civil twilight ($[-6^\circ, -0.8333^\circ)$), Nautical twilight ($[-12^\circ, -6^\circ)$), Astronomical twilight ($[-18^\circ, -12^\circ)$), and Night ($< -18^\circ$). Polar Day and Polar Night are rigorously classified on diurnal minimum and maximum geometric elevation.
+- **Dynamic Uncertainty Decomposition**: Separates ephemeris numerical error ($\pm 0.01^\circ$), atmospheric refraction uncertainty ($\pm 0.05^\circ$ near horizon), dynamic event-time uncertainty ($\Delta t = \Delta h / |dh/dt|$ expanding at high latitudes and tangential grazes), and observer horizon dip ($0.0293^\circ \sqrt{\text{elevationMeters}}$).
+- **Polar Edge Cases**: Graceful classification of Polar Day (Midnight Sun) and Polar Night in high latitudes (e.g. Tromsø $69.65^\circ$N, Svalbard $78.22^\circ$N, Arctic/Antarctic polar circles, and North/South poles $\pm 90^\circ$) with zero NaN errors or exceptions.
+- **Complete Event Locator**: Discrete event search via `ChronoFlux.solar.nextEvent` supporting all 10 events: `sunrise`, `sunset`, `solarNoon`, `solarMidnight`, `civilDawn`, `civilDusk`, `nauticalDawn`, `nauticalDusk`, `astronomicalDawn`, and `astronomicalDusk`.
+- **Safeguarded Root-Finding**: Hybrid bracketed Newton-Raphson and bisection root-finding with explicit convergence criteria and elevation verification.
+- **Performance**: High-throughput instantaneous position evaluation (`solar.evaluatePosition`) and diurnal cycle event caching for repeated queries at the same place and date.
 
 ### 7. Civil Calendar & IANA Time Zone Model
 - **Wall-Clock Evaluation**: Local calendar state (`year`, `month`, `day`, `hour`, `minute`, `second`, `millisecond`, `nanosecond`) for any IANA timezone identifier.
+- **Strict Timezone Requirement**: Silent fallback to UTC is disabled; Place instances must have a valid `timeZoneId` or resolve via a registered `TimeZoneLookupProvider`.
+- **Pluggable Geographic Timezone Provider**: Interface `TimeZoneLookupProvider` allows registering custom polygon or offline geographic timezone lookup engines.
+- **Non-Heuristic DST Detection**: Inspects explicit IANA time zone descriptors and evaluates full annual 12-month offset profiles to handle unique jurisdictions (e.g. Morocco Ramadan shifts) without heuristic solstice sampling.
+- **Reproducible Runtime Provenance**: Exposes underlying civil time runtime and database versions (`tz`, `icu`, `cldr`, `unicode`).
 - **DST Disambiguation**: TC39-compliant resolution of civil wall-clock dates into unambiguous physical `Instant`s:
   - Spring-forward skipped hours: `'compatible'` / `'later'` advances by gap, `'earlier'` moves before gap, `'reject'` throws `RangeError`.
   - Fall-back repeated hours: `'compatible'` / `'earlier'` selects earlier EDT instance, `'later'` selects later EST instance, `'reject'` throws `RangeError`.

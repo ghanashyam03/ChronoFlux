@@ -402,16 +402,50 @@ describe('Civil Calendar & IANA Time Zone Model', () => {
       }).toThrow(RangeError);
     });
 
-    it('evaluates Place instance and defaults to UTC when timeZoneId is omitted', () => {
+    it('throws TypeError when Place instance has no timeZoneId and no provider registered (no silent UTC fallback)', () => {
       const placeWithoutTz = ChronoFlux.place({ latitude: 10, longitude: 20 });
-      const civil = ChronoFlux.civil.evaluate(ChronoFlux.instant('2026-05-01T12:00:00Z'), placeWithoutTz);
-      expect(civil.timeZoneId).toBe('UTC');
-      expect(civil.utcOffsetMinutes).toBe(0);
+      expect(() => {
+        ChronoFlux.civil.evaluate(ChronoFlux.instant('2026-05-01T12:00:00Z'), placeWithoutTz);
+      }).toThrow(TypeError);
 
       const placeWithTz = ChronoFlux.place({ latitude: 10, longitude: 20, timeZoneId: 'Asia/Tokyo' });
       const civilTokyo = ChronoFlux.civil.evaluate(ChronoFlux.instant('2026-05-01T12:00:00Z'), placeWithTz);
       expect(civilTokyo.timeZoneId).toBe('Asia/Tokyo');
       expect(civilTokyo.utcOffsetMinutes).toBe(540);
+    });
+
+    it('resolves Place without timeZoneId when pluggable TimeZoneLookupProvider is registered', () => {
+      const mockProvider = {
+        lookup(lat: number, lon: number): string | null {
+          if (lat === 10 && lon === 20) {
+            return 'Africa/Lagos';
+          }
+          return null;
+        },
+      };
+
+      ChronoFlux.civil.registerTimeZoneLookupProvider(mockProvider);
+      try {
+        const placeWithoutTz = ChronoFlux.place({ latitude: 10, longitude: 20 });
+        const civil = ChronoFlux.civil.evaluate(ChronoFlux.instant('2026-05-01T12:00:00Z'), placeWithoutTz);
+        expect(civil.timeZoneId).toBe('Africa/Lagos');
+        expect(civil.utcOffsetMinutes).toBe(60);
+
+        // Place at unmapped coordinates still throws TypeError
+        const unmapped = ChronoFlux.place({ latitude: 0, longitude: 0 });
+        expect(() => {
+          ChronoFlux.civil.evaluate(ChronoFlux.instant('2026-05-01T12:00:00Z'), unmapped);
+        }).toThrow(TypeError);
+      } finally {
+        ChronoFlux.civil.registerTimeZoneLookupProvider(null);
+      }
+    });
+
+    it('exposes civil time runtime provenance with tz version', () => {
+      const prov = ChronoFlux.civil.getProvenance();
+      expect(prov.runtime).toBeDefined();
+      expect(prov.tzVersion).toBeDefined();
+      expect(prov.icuVersion).toBeDefined();
     });
 
     it('exposes model metadata and disambiguate alias', () => {

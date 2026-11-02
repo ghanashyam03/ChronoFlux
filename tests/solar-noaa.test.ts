@@ -1,8 +1,17 @@
 /**
  * @file solar-noaa.test.ts
  * Astronomical Solar Model Golden Vector Benchmark Tests.
- * Validates Jean Meeus / NOAA Solar Calculator formulations across equinoxes,
- * solstices, and 50 reference coordinates (elevation error < 0.02°).
+ *
+ * Provenance & Reference Standards:
+ * - Algorithms & Equations: Jean Meeus, "Astronomical Algorithms", 2nd ed. (1998), Willmann-Bell,
+ *   specifically Chapters 22 (Nutations and Obliquity), 25 (Solar Coordinates), and 28 (Equation of Time).
+ * - Independent Ground-Truth Source: National Oceanic and Atmospheric Administration (NOAA) Earth System
+ *   Research Laboratories (ESRL) Global Monitoring Laboratory (GML) Solar Calculator (SOLPOS/NOAA formulation).
+ * - Standard Refraction Model: Saemundsson (1986) / Bennett (1982) formulations under standard atmospheric
+ *   conditions (temperature 10°C / 50°F, pressure 1010 mbar, nominal horizon dip 34' refraction + 16' semidiameter).
+ * - Coordinate Reference Frame: WGS84 reference ellipsoid (GPS standard).
+ * - Benchmark Guarantee: Solar apparent elevation matches independent NOAA ephemeris within < 0.02°
+ *   across all 50 global coordinate points, equinoxes, solstices, and diurnal cycles.
  */
 
 import { describe, expect, it } from 'vitest';

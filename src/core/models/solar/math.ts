@@ -298,12 +298,26 @@ export function calcSolarElevationAndZenith(
  * Solar Azimuth Angle in degrees [0, 360) clockwise from true North.
  * NOAA Solar Calculator formulation.
  */
+/**
+ * Solar Azimuth Angle in degrees [0, 360) clockwise from true North.
+ * NOAA Solar Calculator formulation with explicit indeterminate handling at zenith/nadir and poles.
+ */
 export function calcSolarAzimuth(
   latitudeDeg: number,
   declinationDeg: number,
   geometricZenithDeg: number,
   hourAngleDeg: number
-): number {
+): { azimuthDeg: number | null; isAzimuthIndeterminate: boolean } {
+  // Polar singularity: at geographic North or South Pole (|latitude| >= 89.9999°), all directions are South/North; azimuth is indeterminate.
+  if (Math.abs(latitudeDeg) >= 89.9999) {
+    return { azimuthDeg: null, isAzimuthIndeterminate: true };
+  }
+
+  // Zenith / nadir singularity: when zenith is <= 1e-5° (or >= 179.99999°), azimuth is indeterminate.
+  if (geometricZenithDeg <= 1e-5 || geometricZenithDeg >= 179.99999) {
+    return { azimuthDeg: null, isAzimuthIndeterminate: true };
+  }
+
   const phiRad = degToRad(latitudeDeg);
   const deltaRad = degToRad(declinationDeg);
   const zRad = degToRad(geometricZenithDeg);
@@ -313,15 +327,69 @@ export function calcSolarAzimuth(
     let cosAz = (Math.sin(phiRad) * Math.cos(zRad) - Math.sin(deltaRad)) / azDenom;
     cosAz = Math.max(-1.0, Math.min(1.0, cosAz));
     const azDeg = radToDeg(Math.acos(cosAz));
-    if (hourAngleDeg > 0) {
-      return (azDeg + 180.0) % 360.0;
+    const azimuthDeg = hourAngleDeg > 0 ? (azDeg + 180.0) % 360.0 : (540.0 - azDeg) % 360.0;
+    return { azimuthDeg, isAzimuthIndeterminate: false };
+  }
+
+  return { azimuthDeg: null, isAzimuthIndeterminate: true };
+}
+
+/**
+ * Calculates dynamic coordinate and event-time uncertainties.
+ * Separates:
+ * 1. Ephemeris numerical approximation error (±0.01°)
+ * 2. Atmospheric refraction model uncertainty (~10% of refraction, up to ±0.08° at horizon)
+ * 3. Dynamic event-time uncertainty: Delta t = Delta h / |dh/dt|
+ * 4. Observer horizon limitation dip from elevation above sea level
+ */
+export function calcSolarUncertainty(
+  latitudeDeg: number,
+  declinationDeg: number,
+  geometricElevationDeg: number,
+  hourAngleDeg: number,
+  refractionDeg: number,
+  elevationMeters: number = 0
+) {
+  const numericalErrorDeg = 0.01;
+  const atmosphericRefractionUncertaintyDeg = Math.max(0.001, refractionDeg * 0.12);
+  const combinedCoordinateUncertaintyDeg = Math.sqrt(
+    numericalErrorDeg * numericalErrorDeg +
+      atmosphericRefractionUncertaintyDeg * atmosphericRefractionUncertaintyDeg
+  );
+
+  // Rate of change dh/dt in degrees per minute
+  // dh/dt = -cos(phi)*cos(delta)*sin(H) * (0.25 deg/min) / cos(h)
+  const phiRad = degToRad(latitudeDeg);
+  const deltaRad = degToRad(declinationDeg);
+  const hRad = degToRad(hourAngleDeg);
+  const cosH = Math.max(0.01, Math.cos(degToRad(geometricElevationDeg)));
+  const dhDtPerMin = Math.abs(
+    (-Math.cos(phiRad) * Math.cos(deltaRad) * Math.sin(hRad) * 0.25) / cosH
+  );
+
+  let eventTimeUncertaintyMinutes: number;
+  if (dhDtPerMin > 1e-5) {
+    eventTimeUncertaintyMinutes = combinedCoordinateUncertaintyDeg / dhDtPerMin;
+  } else {
+    // Near transit (dh/dt = 0), curvature d2h/dt2 governs transit time uncertainty
+    const omegaMin = degToRad(0.25); // radians per minute
+    const d2hDt2 = Math.abs(Math.cos(phiRad) * Math.cos(deltaRad)) * omegaMin * omegaMin;
+    if (d2hDt2 > 1e-8) {
+      eventTimeUncertaintyMinutes = Math.sqrt((2 * degToRad(combinedCoordinateUncertaintyDeg)) / d2hDt2);
     } else {
-      return (540.0 - azDeg) % 360.0;
+      eventTimeUncertaintyMinutes = 60.0; // high-latitude flat diurnal curve
     }
   }
 
-  // Directly overhead / underfoot: default toward equator
-  return latitudeDeg >= 0 ? 180.0 : 0.0;
+  const horizonLimitationDeg = elevationMeters > 0 ? 0.0293 * Math.sqrt(elevationMeters) : 0.0;
+
+  return {
+    numericalErrorDeg,
+    atmosphericRefractionUncertaintyDeg,
+    combinedCoordinateUncertaintyDeg,
+    eventTimeUncertaintyMinutes,
+    horizonLimitationDeg,
+  };
 }
 
 /**
@@ -344,11 +412,19 @@ export function computeSolarCoordinates(instant: Instant, place: Place) {
   const hourAngleDeg = calcHourAngle(trueSolarTimeMinutes);
 
   const angles = calcSolarElevationAndZenith(place.latitude, declinationDeg, hourAngleDeg);
-  const azimuthDeg = calcSolarAzimuth(
+  const { azimuthDeg, isAzimuthIndeterminate } = calcSolarAzimuth(
     place.latitude,
     declinationDeg,
     angles.geometricZenithDeg,
     hourAngleDeg
+  );
+  const uncertainty = calcSolarUncertainty(
+    place.latitude,
+    declinationDeg,
+    angles.geometricElevationDeg,
+    hourAngleDeg,
+    angles.atmosphericRefractionDeg,
+    place.elevationMeters ?? 0
   );
 
   return {
@@ -367,6 +443,8 @@ export function computeSolarCoordinates(instant: Instant, place: Place) {
     trueSolarTimeMinutes,
     hourAngleDeg,
     azimuthDeg,
+    isAzimuthIndeterminate,
+    uncertainty,
     ...angles,
   };
 }
@@ -440,11 +518,12 @@ export function calcSolarMidnight(instant: Instant, longitudeDeg: number): Insta
 }
 
 /**
- * Solves the crossing time for a target geometric elevation angle on a given branch.
+ * Solves the crossing time for a target geometric elevation angle on a given branch
+ * using safeguarded hybrid Newton-Raphson / bisection root-finding with explicit elevation verification.
  *
  * @param place Geographic location
  * @param noon Instant of solar noon for the diurnal cycle
- * @param targetElevationDeg Target geometric elevation in degrees (e.g. -0.833° for sunrise/sunset, -6° for civil dawn/dusk)
+ * @param targetElevationDeg Target geometric elevation in degrees (e.g. -0.8333° for sunrise/sunset, -6° for civil dawn/dusk)
  * @param direction 'rising' (morning branch [noon - 12h, noon]) or 'setting' (afternoon branch [noon, noon + 12h])
  */
 export function findSolarCrossing(
@@ -481,9 +560,18 @@ export function findSolarCrossing(
       return null;
     }
 
-    let currentNs = noon.epochNanoseconds + BigInt(Math.round(fractionOfDay * 86_400_000_000_000));
-    for (let iter = 0; iter < 5; iter++) {
-      const curInstant = Instant.fromEpochNanoseconds(currentNs);
+    let aNs = noon.epochNanoseconds - 43_200_000_000_000n;
+    let bNs = noon.epochNanoseconds + 43_200_000_000_000n;
+    const fA = computeSolarCoordinates(Instant.fromEpochNanoseconds(aNs), place).geometricElevationDeg - targetElevationDeg;
+    const fB = computeSolarCoordinates(Instant.fromEpochNanoseconds(bNs), place).geometricElevationDeg - targetElevationDeg;
+
+    if (fA * fB > 0 && Math.abs(fA) > 1e-4 && Math.abs(fB) > 1e-4) {
+      return null;
+    }
+
+    let curNs = noon.epochNanoseconds + BigInt(Math.round(fractionOfDay * 86_400_000_000_000));
+    for (let iter = 0; iter < 15; iter++) {
+      const curInstant = Instant.fromEpochNanoseconds(curNs);
       const coords = computeSolarCoordinates(curInstant, place);
       const errorDeg = coords.geometricElevationDeg - targetElevationDeg;
       if (Math.abs(errorDeg) < 1e-5) {
@@ -492,50 +580,113 @@ export function findSolarCrossing(
       const dElevDt = dElevPerDay / 86400.0;
       const rawCorrectionSec = -errorDeg / dElevDt;
       const correctionSec = Math.max(-43200, Math.min(43200, rawCorrectionSec));
-      currentNs += BigInt(Math.round(correctionSec * 1_000_000_000));
+      curNs += BigInt(Math.round(correctionSec * 1_000_000_000));
     }
 
-    return Instant.fromEpochNanoseconds(currentNs);
-  }
-
-  const coordsNoon = computeSolarCoordinates(noon, place);
-  const deltaRad = degToRad(coordsNoon.declinationDeg);
-  const hTargetRad = degToRad(targetElevationDeg);
-
-  const cosH0 = (Math.sin(hTargetRad) - Math.sin(phiRad) * Math.sin(deltaRad)) / (cosPhi * Math.cos(deltaRad));
-
-  // Check if crossing is geometrically impossible
-  if (cosH0 > 1.0 || cosH0 < -1.0) {
+    const candidate = Instant.fromEpochNanoseconds(curNs);
+    const checkCoords = computeSolarCoordinates(candidate, place);
+    if (Math.abs(checkCoords.geometricElevationDeg - targetElevationDeg) <= 0.005) {
+      return candidate;
+    }
     return null;
   }
 
-  const h0Deg = radToDeg(Math.acos(Math.max(-1.0, Math.min(1.0, cosH0))));
-  const halfDaySec = h0Deg * 240.0;
+  // Non-polar: define exact 12-hour search bracket for this diurnal branch
+  // Rising branch: [noon - 12h, noon]
+  // Setting branch: [noon, noon + 12h]
+  const TWELVE_HOURS_NS = 43_200_000_000_000n;
+  const startNs = direction === 'rising' ? noon.epochNanoseconds - TWELVE_HOURS_NS : noon.epochNanoseconds;
+  const endNs = direction === 'rising' ? noon.epochNanoseconds : noon.epochNanoseconds + TWELVE_HOURS_NS;
 
-  const sign = direction === 'rising' ? -1 : 1;
-  let currentNs = noon.epochNanoseconds + BigInt(Math.round(sign * halfDaySec * 1_000_000_000));
+  const instantA = Instant.fromEpochNanoseconds(startNs);
+  const instantB = Instant.fromEpochNanoseconds(endNs);
+  let fA = computeSolarCoordinates(instantA, place).geometricElevationDeg - targetElevationDeg;
+  let fB = computeSolarCoordinates(instantB, place).geometricElevationDeg - targetElevationDeg;
 
-  // Refine crossing using Newton-Raphson root-finding
-  for (let iter = 0; iter < 5; iter++) {
+  // Tangential touch checks at endpoints
+  if (Math.abs(fA) < 1e-5) {
+    return instantA;
+  }
+  if (Math.abs(fB) < 1e-5) {
+    return instantB;
+  }
+
+  // If endpoints have identical signs, check if crossing is impossible or tangential
+  if (fA * fB > 0) {
+    return null;
+  }
+
+  // Crossing is strictly bracketed: compute initial guess via spherical trigonometry
+  const coordsNoon = computeSolarCoordinates(noon, place);
+  const deltaRad = degToRad(coordsNoon.declinationDeg);
+  const hTargetRad = degToRad(targetElevationDeg);
+  const cosH0 = (Math.sin(hTargetRad) - Math.sin(phiRad) * Math.sin(deltaRad)) / (cosPhi * Math.cos(deltaRad));
+
+  let currentNs: bigint;
+  if (cosH0 >= -1.0 && cosH0 <= 1.0) {
+    const h0Deg = radToDeg(Math.acos(cosH0));
+    const halfDaySec = h0Deg * 240.0;
+    const sign = direction === 'rising' ? -1 : 1;
+    currentNs = noon.epochNanoseconds + BigInt(Math.round(sign * halfDaySec * 1_000_000_000));
+    if (currentNs < startNs || currentNs > endNs) {
+      currentNs = (startNs + endNs) / 2n;
+    }
+  } else {
+    currentNs = (startNs + endNs) / 2n;
+  }
+
+  let bracketANs = startNs;
+  let bracketBNs = endNs;
+
+  // Safeguarded hybrid Newton-Raphson / Bisection solver
+  for (let iter = 0; iter < 25; iter++) {
     const curInstant = Instant.fromEpochNanoseconds(currentNs);
     const coords = computeSolarCoordinates(curInstant, place);
     const errorDeg = coords.geometricElevationDeg - targetElevationDeg;
-    if (Math.abs(errorDeg) < 1e-5) {
+
+    if (Math.abs(errorDeg) < 1e-6 || bracketBNs - bracketANs <= 1_000_000n) {
       break;
     }
+
+    // Update bracket
+    if ((fA > 0 && errorDeg > 0) || (fA < 0 && errorDeg < 0)) {
+      bracketANs = currentNs;
+      fA = errorDeg;
+    } else {
+      bracketBNs = currentNs;
+      fB = errorDeg;
+    }
+
     // Rate of change dh/dt = -cos(phi)*cos(delta)*sin(H) / (cos(h) * 240 deg/sec)
     const curPhiRad = degToRad(place.latitude);
     const curDeltaRad = degToRad(coords.declinationDeg);
     const curHRad = degToRad(coords.hourAngleDeg);
     const cosH = Math.max(0.01, Math.cos(degToRad(coords.geometricElevationDeg)));
-    let dhDt = (-Math.cos(curPhiRad) * Math.cos(curDeltaRad) * Math.sin(curHRad)) / (cosH * 240.0);
-    if (Math.abs(dhDt) < 1e-6) {
-      dhDt = direction === 'rising' ? 1.0 / 240.0 : -1.0 / 240.0;
+    const dhDt = (-Math.cos(curPhiRad) * Math.cos(curDeltaRad) * Math.sin(curHRad)) / (cosH * 240.0);
+
+    let nextNs: bigint = (bracketANs + bracketBNs) / 2n;
+
+    if (Math.abs(dhDt) > 1e-6) {
+      const stepSec = -errorDeg / dhDt;
+      const candidateNs = currentNs + BigInt(Math.round(stepSec * 1_000_000_000));
+      // Safeguard: candidate must lie strictly inside bracket with 5% safety margin
+      const margin = (bracketBNs - bracketANs) / 20n;
+      if (candidateNs >= bracketANs + margin && candidateNs <= bracketBNs - margin) {
+        nextNs = candidateNs;
+      }
     }
-    const rawCorrectionSec = -errorDeg / dhDt;
-    const correctionSec = Math.max(-7200, Math.min(7200, rawCorrectionSec));
-    currentNs += BigInt(Math.round(correctionSec * 1_000_000_000));
+
+    currentNs = nextNs;
   }
 
-  return Instant.fromEpochNanoseconds(currentNs);
+  const resultInstant = Instant.fromEpochNanoseconds(currentNs);
+
+  // Explicit verification against calculated elevation
+  const verifyCoords = computeSolarCoordinates(resultInstant, place);
+  const finalErrorDeg = Math.abs(verifyCoords.geometricElevationDeg - targetElevationDeg);
+  if (finalErrorDeg > 0.005) {
+    return null;
+  }
+
+  return resultInstant;
 }

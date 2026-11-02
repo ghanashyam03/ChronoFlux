@@ -3,8 +3,21 @@
  * Main entry point for @chronoflux/core.
  */
 
-import { civilModel, CivilModel, CivilState, CivilDateTimeInput } from './core/models/civil/index.js';
-import { solarModel, SolarModel, SolarState, SolarEventOptions } from './core/models/solar/index.js';
+import {
+  civilModel,
+  CivilModel,
+  CivilState,
+  CivilDateTimeInput,
+  TimeZoneLookupProvider,
+  CivilTimeProvenance,
+} from './core/models/civil/index.js';
+import {
+  solarModel,
+  SolarModel,
+  SolarState,
+  SolarEventOptions,
+  InstantaneousSolarPosition,
+} from './core/models/solar/index.js';
 import { Duration, DurationFields } from './core/primitives/duration.js';
 import { Instant } from './core/primitives/instant.js';
 import { Interval } from './core/primitives/interval.js';
@@ -113,6 +126,13 @@ export const ChronoFlux = Object.freeze({
    */
   solar: Object.freeze({
     /**
+     * Evaluates instantaneous solar position without diurnal event solving overhead.
+     */
+    evaluatePosition(instant: Instant, place: Place): InstantaneousSolarPosition {
+      return solarModel.evaluatePosition(instant, place);
+    },
+
+    /**
      * Evaluates full astronomical solar state at a given Instant and Place.
      */
     evaluate(instant: Instant, place: Place): SolarState {
@@ -162,6 +182,27 @@ export const ChronoFlux = Object.freeze({
        * Alias for resolve(). Resolves civil wall-clock time with explicit DST disambiguation.
        */
       disambiguate: resolve,
+
+      /**
+       * Registers a global pluggable geographic timezone lookup provider.
+       */
+      registerTimeZoneLookupProvider(provider: TimeZoneLookupProvider | null): void {
+        civilModel.registerTimeZoneLookupProvider(provider);
+      },
+
+      /**
+       * Gets the currently registered geographic timezone lookup provider.
+       */
+      getTimeZoneLookupProvider(): TimeZoneLookupProvider | null {
+        return civilModel.getTimeZoneLookupProvider();
+      },
+
+      /**
+       * Returns provenance metadata about the runtime environment and IANA tz database.
+       */
+      getProvenance(): CivilTimeProvenance {
+        return civilModel.getProvenance();
+      },
 
       /**
        * The underlying CivilModel instance.

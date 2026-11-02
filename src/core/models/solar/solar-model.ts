@@ -15,20 +15,20 @@ import {
   findSolarCrossing,
   NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
 } from './math.js';
-import { classifySolarPhase, DIRECT_SUNLIGHT_THRESHOLD_DEG, evaluatePolarRegime } from './polar.js';
-import { SolarEventOptions, SolarState } from './types.js';
+import { classifySolarPhase, evaluatePolarRegime, PolarRegime } from './polar.js';
+import { InstantaneousSolarPosition, SolarEventOptions, SolarState } from './types.js';
 
 export const SOLAR_MODEL_METADATA: ModelMetadata = Object.freeze({
   name: 'Astronomical Solar Model (Jean Meeus / NOAA)',
   version: '1.0.0',
   accuracy: Object.freeze({
     timeResolution: Duration.fromMilliseconds(1),
-    marginOfError: '±0.01° for 1800-2100 CE (±0.04 minutes / ~2.4 seconds of time)',
+    marginOfError: '±0.01° for 1800-2100 CE; dynamic event-time uncertainty Delta t = Delta h / |dh/dt|',
   }),
   assumptions: Object.freeze([
     'Jean Meeus (Astronomical Algorithms, 2nd ed.) solar positioning formulations',
     'NOAA Solar Calculator atmospheric refraction formulation (Saemundsson / Bennett nominal 1010 mbar, 10°C)',
-    'Nominal solar disc center-of-disc horizon dip of -0.833° (34 arcmin refraction + 16 arcmin semidiameter)',
+    'Nominal solar disc center-of-disc horizon dip of -0.8333° (34 arcmin refraction + 16 arcmin semidiameter)',
     'WGS84 ellipsoidal coordinate frame',
     'Leap-second-free Unix epoch time scale',
   ]),
@@ -38,6 +38,60 @@ export const SOLAR_MODEL_METADATA: ModelMetadata = Object.freeze({
   ),
 });
 
+interface DiurnalCycleEvents extends PolarRegime {
+  readonly sunrise: Instant | null;
+  readonly sunset: Instant | null;
+}
+
+const MAX_DIURNAL_CACHE_SIZE = 512;
+const diurnalCache = new Map<string, DiurnalCycleEvents>();
+
+function getDiurnalCycleEvents(place: Place, instant: Instant): DiurnalCycleEvents {
+  const noon = calcSolarNoon(instant, place.longitude);
+  const cacheKey = `${place.latitude.toFixed(5)},${place.longitude.toFixed(5)}:${noon.epochNanoseconds}`;
+
+  const cached = diurnalCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const regime = evaluatePolarRegime(place, instant);
+  let sunrise: Instant | null = null;
+  let sunset: Instant | null = null;
+
+  if (!regime.isPolarDay && !regime.isPolarNight) {
+    sunrise = findSolarCrossing(
+      place,
+      regime.solarNoon,
+      NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
+      'rising'
+    );
+    sunset = findSolarCrossing(
+      place,
+      regime.solarNoon,
+      NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
+      'setting'
+    );
+  }
+
+  const events: DiurnalCycleEvents = Object.freeze({
+    ...regime,
+    sunrise,
+    sunset,
+  });
+
+  if (diurnalCache.size >= MAX_DIURNAL_CACHE_SIZE) {
+    // Evict oldest entry
+    const oldestKey = diurnalCache.keys().next().value;
+    if (oldestKey) {
+      diurnalCache.delete(oldestKey);
+    }
+  }
+  diurnalCache.set(cacheKey, events);
+
+  return events;
+}
+
 /**
  * SolarModel calculates astronomical solar position, twilight regimes,
  * and sunrise/sunset/transit events using Meeus and NOAA formulations.
@@ -46,52 +100,66 @@ export class SolarModel implements TemporalModel<SolarState> {
   readonly metadata: ModelMetadata = SOLAR_MODEL_METADATA;
 
   /**
-   * Evaluates the full solar state at a given Instant and Place.
+   * Evaluates instantaneous solar coordinates and position without expensive diurnal event solving.
+   * Highly optimized for timeseries loops and high-throughput queries.
    */
-  evaluate(instant: Instant, place: Place): SolarState {
+  evaluatePosition(instant: Instant, place: Place): InstantaneousSolarPosition {
     const coords = computeSolarCoordinates(instant, place);
     const regime = evaluatePolarRegime(place, instant);
-    const phase = classifySolarPhase(coords.apparentElevationDeg, regime);
+    const phase = classifySolarPhase(coords.geometricElevationDeg, regime);
 
-    let sunrise: Instant | null = null;
-    let sunset: Instant | null = null;
-
-    if (!regime.isPolarDay && !regime.isPolarNight) {
-      sunrise = findSolarCrossing(
-        place,
-        regime.solarNoon,
-        NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
-        'rising'
-      );
-      sunset = findSolarCrossing(
-        place,
-        regime.solarNoon,
-        NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
-        'setting'
-      );
-    }
-
-    const state: SolarState = Object.freeze({
+    return Object.freeze({
       elevationDeg: coords.apparentElevationDeg,
       geometricElevationDeg: coords.geometricElevationDeg,
       azimuthDeg: coords.azimuthDeg,
+      isAzimuthIndeterminate: coords.isAzimuthIndeterminate,
       zenithDeg: coords.apparentZenithDeg,
       phase,
-      isDirectSunlight: coords.apparentElevationDeg >= DIRECT_SUNLIGHT_THRESHOLD_DEG,
-      isPolarDay: regime.isPolarDay,
-      isPolarNight: regime.isPolarNight,
-      solarNoon: regime.solarNoon,
-      solarMidnight: regime.solarMidnight,
-      sunrise,
-      sunset,
+      isDirectSunlight: coords.geometricElevationDeg >= NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
       declinationDeg: coords.declinationDeg,
       rightAscensionDeg: coords.rightAscensionDeg,
       equationOfTimeMinutes: coords.equationOfTimeMinutes,
       hourAngleDeg: coords.hourAngleDeg,
       trueSolarTimeMinutes: coords.trueSolarTimeMinutes,
       atmosphericRefractionDeg: coords.atmosphericRefractionDeg,
-      uncertaintyDeg: 0.01,
-      uncertaintyMinutes: 0.04,
+      uncertaintyDeg: coords.uncertainty.combinedCoordinateUncertaintyDeg,
+      uncertaintyMinutes: coords.uncertainty.eventTimeUncertaintyMinutes,
+      uncertainty: coords.uncertainty,
+    });
+  }
+
+  /**
+   * Evaluates the full solar state at a given Instant and Place.
+   * Utilizes high-performance diurnal event caching for repeated queries at the same location and date.
+   */
+  evaluate(instant: Instant, place: Place): SolarState {
+    const coords = computeSolarCoordinates(instant, place);
+    const diurnal = getDiurnalCycleEvents(place, instant);
+    const phase = classifySolarPhase(coords.geometricElevationDeg, diurnal);
+
+    const state: SolarState = Object.freeze({
+      elevationDeg: coords.apparentElevationDeg,
+      geometricElevationDeg: coords.geometricElevationDeg,
+      azimuthDeg: coords.azimuthDeg,
+      isAzimuthIndeterminate: coords.isAzimuthIndeterminate,
+      zenithDeg: coords.apparentZenithDeg,
+      phase,
+      isDirectSunlight: coords.geometricElevationDeg >= NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
+      isPolarDay: diurnal.isPolarDay,
+      isPolarNight: diurnal.isPolarNight,
+      solarNoon: diurnal.solarNoon,
+      solarMidnight: diurnal.solarMidnight,
+      sunrise: diurnal.sunrise,
+      sunset: diurnal.sunset,
+      declinationDeg: coords.declinationDeg,
+      rightAscensionDeg: coords.rightAscensionDeg,
+      equationOfTimeMinutes: coords.equationOfTimeMinutes,
+      hourAngleDeg: coords.hourAngleDeg,
+      trueSolarTimeMinutes: coords.trueSolarTimeMinutes,
+      atmosphericRefractionDeg: coords.atmosphericRefractionDeg,
+      uncertaintyDeg: coords.uncertainty.combinedCoordinateUncertaintyDeg,
+      uncertaintyMinutes: coords.uncertainty.eventTimeUncertaintyMinutes,
+      uncertainty: coords.uncertainty,
     });
 
     return state;

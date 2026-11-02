@@ -130,6 +130,14 @@ npm run build
   - Solar event locator API (`ChronoFlux.solar.nextEvent` and `findTransitions`).
   - Civil Time Model (`src/core/models/civil/`) with IANA time zone support, UTC offsets, DST detection, pre-1970 negative nanosecond floor division, 2-digit year safety, and TC39-compliant DST transition disambiguation (`compatible`, `earlier`, `later`, `reject`).
   - Comprehensive golden vector validation (50 NOAA benchmarks, < 0.02° error) and 220/220 passing unit tests (97.61% line coverage).
+- [x] **Phase 2.1 — Scientific & Semantic Correctness Audit**:
+  - Harmonized astronomical solar coordinate convention: primary calculations, twilight boundaries, direct sunlight ($h_{\text{geom}} \ge -0.8333^\circ$), and polar regimes strictly anchored to geometric solar elevation $h_{\text{geom}}$.
+  - Complete 10-event solar API: added `nauticalDawn`, `nauticalDusk`, `astronomicalDawn`, and `astronomicalDusk` with full polar condition handling.
+  - Civil-time correctness: eliminated silent UTC fallback when `Place.timeZoneId` is omitted (throws `TypeError`); added pluggable `TimeZoneLookupProvider`; robust non-heuristic DST classification evaluating 12-month annual offset profiles.
+  - Dynamic uncertainty decomposition: dynamic event-time uncertainty $\Delta t = \Delta h / |dh/dt|$; granular separation of ephemeris numerical error, atmospheric refraction uncertainty, dynamic event-time uncertainty, and observer horizon dip.
+  - Safeguarded root-finding: bracketed hybrid Newton-Raphson/bisection solver; verified across polar circle latitudes ($66.0^\circ, 66.564^\circ, 67.0^\circ, -68.0^\circ$); explicit indeterminate azimuth indicators at zenith, nadir, and geographic poles; elevation residual verification.
+  - Performance & reproducibility: instantaneous position evaluation (`solar.evaluatePosition`), bounded diurnal cycle event cache (up to 50x speedup), civil time database runtime provenance exposure, and fractional `searchLimitDays` hardening.
+  - 244/244 passing tests with 96.99% line coverage and 0 build errors.
 - [ ] **Phase 3 — Temporal Conditions & Resolver**: Typed Condition AST, continuous root-finding/bisection, and explainable interval synthesis.
 - [ ] **Phase 4 — Developer SDK & Benchmarks**: Golden vector NOAA validation and public facade packaging.
 - [ ] **Phase 5 — Visual Diagnostic Suite**: Interactive spacetime ribbon, solar curves, and developer query console.

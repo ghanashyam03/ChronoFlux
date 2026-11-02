@@ -8,7 +8,22 @@ import { Instant } from '../../primitives/instant.js';
 import { Place } from '../../primitives/place.js';
 import { ModelMetadata, TemporalModel } from '../model.js';
 import { getFormatter, safeDateUtc, resolveCivilDateTimeToInstant } from './disambiguation.js';
-import { CivilDateTimeInput, CivilState } from './types.js';
+import { CivilDateTimeInput, CivilState, CivilTimeProvenance, TimeZoneLookupProvider } from './types.js';
+
+/**
+ * Returns provenance metadata about the runtime environment and IANA tz database.
+ */
+export function getCivilTimeProvenance(): CivilTimeProvenance {
+  const proc = typeof globalThis !== 'undefined' ? (globalThis as any).process : undefined;
+  const versions = proc?.versions;
+  return Object.freeze({
+    runtime: typeof process !== 'undefined' && process.version ? `Node.js ${process.version}` : 'ECMAScript Intl',
+    tzVersion: versions?.tz ?? 'system',
+    icuVersion: versions?.icu ?? 'system',
+    cldrVersion: versions?.cldr ?? 'system',
+    unicodeVersion: versions?.unicode ?? 'system',
+  });
+}
 
 export const CIVIL_MODEL_METADATA: ModelMetadata = Object.freeze({
   name: 'Civil Calendar & IANA Time Zone Model',
@@ -21,6 +36,7 @@ export const CIVIL_MODEL_METADATA: ModelMetadata = Object.freeze({
     'IANA Time Zone Database rules evaluated via ECMAScript Intl / TC39 Temporal engine',
     'Standard Gregorian calendar conventions',
     'Contextual separation of geographic coordinates from political time zone definitions',
+    'Explicit IANA time zone requirement (silent UTC fallback disabled)',
   ]),
 });
 
@@ -82,29 +98,99 @@ function extractLocalParts(epochMs: number, timeZoneId: string): LocalParts {
   };
 }
 
-const standardOffsetCache = new Map<string, number>();
+let registeredTimeZoneLookupProvider: TimeZoneLookupProvider | null = null;
 
-function getStandardOffsetMs(timeZoneId: string, year: number): number {
-  const key = `${timeZoneId}:${year}`;
-  let std = standardOffsetCache.get(key);
-  if (std === undefined) {
-    const janMs = safeDateUtc(year, 0, 15, 12, 0, 0);
-    const julMs = safeDateUtc(year, 6, 15, 12, 0, 0);
-    const janOffset = extractLocalParts(janMs, timeZoneId).offsetMs;
-    const julOffset = extractLocalParts(julMs, timeZoneId).offsetMs;
-    std = Math.min(janOffset, julOffset);
-    standardOffsetCache.set(key, std);
-  }
-  return std;
+/**
+ * Registers a global pluggable geographic timezone lookup provider.
+ * Pass null to deregister.
+ */
+export function registerTimeZoneLookupProvider(provider: TimeZoneLookupProvider | null): void {
+  registeredTimeZoneLookupProvider = provider;
 }
 
 /**
- * Evaluates whether Daylight Saving Time is actively in effect by comparing the current offset
- * against the minimum (standard) offset across seasonal solstices (Jan 15 and Jul 15) for that year.
+ * Retrieves the currently registered geographic timezone lookup provider.
  */
-function isDstActive(currentOffsetMs: number, timeZoneId: string, year: number): boolean {
-  const standardOffsetMs = getStandardOffsetMs(timeZoneId, year);
-  return currentOffsetMs > standardOffsetMs;
+export function getTimeZoneLookupProvider(): TimeZoneLookupProvider | null {
+  return registeredTimeZoneLookupProvider;
+}
+
+interface AnnualTzProfile {
+  readonly minOffsetMs: number;
+  readonly maxOffsetMs: number;
+  readonly hasDstTransitions: boolean;
+}
+
+const annualTzProfileCache = new Map<string, AnnualTzProfile>();
+
+function getAnnualTzProfile(timeZoneId: string, year: number): AnnualTzProfile {
+  const key = `${timeZoneId}:${year}`;
+  let profile = annualTzProfileCache.get(key);
+  if (profile === undefined) {
+    let minOffset = Infinity;
+    let maxOffset = -Infinity;
+
+    // Sample mid-month (15th) of each month 0..11 at 12:00 UTC
+    for (let month = 0; month < 12; month++) {
+      const sampleMs = safeDateUtc(year, month, 15, 12, 0, 0);
+      const off = extractLocalParts(sampleMs, timeZoneId).offsetMs;
+      if (off < minOffset) minOffset = off;
+      if (off > maxOffset) maxOffset = off;
+    }
+
+    profile = Object.freeze({
+      minOffsetMs: minOffset,
+      maxOffsetMs: maxOffset,
+      hasDstTransitions: minOffset !== maxOffset,
+    });
+    annualTzProfileCache.set(key, profile);
+  }
+  return profile;
+}
+
+const tzNameFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function getTimeZoneNameFormatter(timeZoneId: string): Intl.DateTimeFormat {
+  let fmt = tzNameFormatterCache.get(timeZoneId);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-US', { timeZone: timeZoneId, timeZoneName: 'long' });
+    tzNameFormatterCache.set(timeZoneId, fmt);
+  }
+  return fmt;
+}
+
+/**
+ * Robustly evaluates whether Daylight Saving Time is actively in effect.
+ *
+ * Distinct from physical UTC offset:
+ * 1. Inspects explicit IANA timeZoneName ('Daylight Time' / 'Summer Time' vs 'Standard Time').
+ * 2. For jurisdictions with numeric or non-descriptive names (e.g. Morocco Ramadan shifts),
+ *    evaluates against the full annual offset distribution across all 12 months for that calendar year.
+ * 3. Never falsely flags non-DST timezones (e.g. Asia/Kolkata, Asia/Tokyo, America/Phoenix) as DST.
+ */
+function isDstActive(epochMs: number, currentOffsetMs: number, timeZoneId: string, year: number): boolean {
+  try {
+    const formatter = getTimeZoneNameFormatter(timeZoneId);
+    const parts = formatter.formatToParts(new Date(epochMs));
+    const tzNamePart = parts.find((p) => p.type === 'timeZoneName')?.value;
+
+    if (tzNamePart) {
+      if (/daylight|summer/i.test(tzNamePart)) {
+        return true;
+      }
+      if (/standard/i.test(tzNamePart)) {
+        return false;
+      }
+    }
+  } catch {
+    // Fall back to annual offset distribution
+  }
+
+  const profile = getAnnualTzProfile(timeZoneId, year);
+  if (!profile.hasDstTransitions) {
+    return false;
+  }
+  return currentOffsetMs > profile.minOffsetMs;
 }
 
 /**
@@ -159,14 +245,56 @@ export class CivilModel implements TemporalModel<CivilState> {
   readonly metadata: ModelMetadata = CIVIL_MODEL_METADATA;
 
   /**
+   * Registers a global pluggable geographic timezone lookup provider.
+   */
+  registerTimeZoneLookupProvider(provider: TimeZoneLookupProvider | null): void {
+    registerTimeZoneLookupProvider(provider);
+  }
+
+  /**
+   * Gets the currently registered geographic timezone lookup provider.
+   */
+  getTimeZoneLookupProvider(): TimeZoneLookupProvider | null {
+    return getTimeZoneLookupProvider();
+  }
+
+  /**
+   * Returns provenance metadata of the underlying civil-time database and runtime.
+   */
+  getProvenance(): CivilTimeProvenance {
+    return getCivilTimeProvenance();
+  }
+
+  /**
    * Evaluates local civil calendar state for a given Instant and Place (or time zone identifier).
+   *
+   * Requirement: Never silently defaults to UTC. If a Place has no timeZoneId, throws a TypeError
+   * unless a TimeZoneLookupProvider is registered that successfully resolves it.
    */
   evaluate(instant: Instant, placeOrTimeZone: Place | string): CivilState {
     let timeZoneId: string;
     if (typeof placeOrTimeZone === 'string') {
       timeZoneId = placeOrTimeZone.trim();
     } else if (placeOrTimeZone instanceof Place) {
-      timeZoneId = placeOrTimeZone.timeZoneId ?? 'UTC';
+      if (placeOrTimeZone.timeZoneId && placeOrTimeZone.timeZoneId.trim().length > 0) {
+        timeZoneId = placeOrTimeZone.timeZoneId.trim();
+      } else if (registeredTimeZoneLookupProvider !== null) {
+        const lookedUp = registeredTimeZoneLookupProvider.lookup(
+          placeOrTimeZone.latitude,
+          placeOrTimeZone.longitude
+        );
+        if (lookedUp && lookedUp.trim().length > 0) {
+          timeZoneId = lookedUp.trim();
+        } else {
+          throw new TypeError(
+            `Place at (${placeOrTimeZone.latitude}, ${placeOrTimeZone.longitude}) does not contain a timeZoneId, and registered TimeZoneLookupProvider returned null. An explicit IANA time zone identifier is required for civil calendar evaluation.`
+          );
+        }
+      } else {
+        throw new TypeError(
+          `Place at (${placeOrTimeZone.latitude}, ${placeOrTimeZone.longitude}) does not contain a timeZoneId. An explicit IANA time zone identifier is required for civil calendar evaluation (silent UTC fallback is disabled). Specify place.timeZoneId, an explicit IANA string, or register a TimeZoneLookupProvider.`
+        );
+      }
     } else {
       throw new TypeError(
         'placeOrTimeZone must be a valid Place instance or IANA timeZoneId string'
@@ -195,7 +323,7 @@ export class CivilModel implements TemporalModel<CivilState> {
     const { epochMs, nanosecond } = splitEpochNanoseconds(instant.epochNanoseconds);
 
     const local = extractLocalParts(epochMs, cleanTz);
-    const isDaylightSaving = isDstActive(local.offsetMs, cleanTz, local.year);
+    const isDaylightSaving = isDstActive(epochMs, local.offsetMs, cleanTz, local.year);
     const isAmbiguous = checkIsAmbiguous(epochMs, local, cleanTz);
 
     const state: CivilState = Object.freeze({
