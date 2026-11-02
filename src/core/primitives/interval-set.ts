@@ -65,10 +65,29 @@ export class IntervalSet implements Iterable<Interval> {
   }
 
   /**
-   * Fast-path internal factory when caller guarantees the intervals are already canonical.
+   * Fast-path factory when caller provides intervals that are already sorted, non-overlapping, and non-adjacent.
+   * Validates canonical invariants to guarantee set integrity.
    */
   static fromSortedDisjoint(intervals: readonly Interval[]): IntervalSet {
-    return new IntervalSet(intervals);
+    if (!Array.isArray(intervals)) {
+      throw new TypeError('Expected an array of intervals in fromSortedDisjoint');
+    }
+    for (let i = 0; i < intervals.length; i++) {
+      const current = intervals[i];
+      if (!(current instanceof Interval)) {
+        throw new TypeError('All items in intervals must be valid Interval instances');
+      }
+      if (i > 0) {
+        const prev = intervals[i - 1]!;
+        if (!prev.end.isBefore(current.start)) {
+          throw new RangeError(
+            `Intervals in fromSortedDisjoint must be strictly sorted and non-adjacent: ` +
+              `previous end=${prev.end.toISOString()} is not before current start=${current.start.toISOString()}`
+          );
+        }
+      }
+    }
+    return new IntervalSet(intervals.slice());
   }
 
   // --- Normalization Algorithm ---
@@ -151,6 +170,9 @@ export class IntervalSet implements Iterable<Interval> {
    * Executes via binary search in O(log N) time.
    */
   contains(instant: Instant): boolean {
+    if (!(instant instanceof Instant)) {
+      throw new TypeError('Expected an Instant instance in IntervalSet.contains');
+    }
     if (this.intervals.length === 0) return false;
 
     let low = 0;
@@ -180,6 +202,9 @@ export class IntervalSet implements Iterable<Interval> {
    * by this set if and only if some single component interval encloses it.
    */
   encloses(interval: Interval): boolean {
+    if (!(interval instanceof Interval)) {
+      throw new TypeError('Expected an Interval instance in IntervalSet.encloses');
+    }
     if (this.intervals.length === 0) return false;
 
     let low = 0;
@@ -338,10 +363,13 @@ export class IntervalSet implements Iterable<Interval> {
    * complement(within) = within \setminus this.
    */
   complement(within: Interval): IntervalSet {
+    if (!(within instanceof Interval)) {
+      throw new TypeError('Expected an Interval instance as boundary in IntervalSet.complement');
+    }
     return IntervalSet.fromInterval(within).difference(this);
   }
 
-  equals(other: IntervalSet): boolean {
+  equals(other: unknown): boolean {
     if (!(other instanceof IntervalSet)) return false;
     if (this.intervals.length !== other.intervals.length) return false;
 

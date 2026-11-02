@@ -232,6 +232,36 @@ describe('Duration Primitive', () => {
     it('throws on invalid ISO duration strings', () => {
       expect(() => Duration.parseISO('invalid')).toThrow(RangeError);
       expect(() => Duration.parseISO('10S')).toThrow(RangeError);
+
+      // Bare P and PT without components are invalid in ISO 8601
+      expect(() => Duration.parseISO('P')).toThrow(RangeError);
+      expect(() => Duration.parseISO('PT')).toThrow(RangeError);
+      expect(() => Duration.parseISO('-P')).toThrow(RangeError);
+      expect(() => Duration.parseISO('+P')).toThrow(RangeError);
+      expect(() => Duration.parseISO('P1DT')).toThrow(RangeError);
+    });
+
+    it('safe equals and comparison methods against null and invalid instances', () => {
+      expect(Duration.zero().equals(null)).toBe(false);
+      expect(Duration.zero().equals(undefined)).toBe(false);
+      expect(Duration.zero().equals(0)).toBe(false);
+      expect(Duration.zero().equals({})).toBe(false);
+
+      expect(() => Duration.zero().compareTo(null as any)).toThrow(TypeError);
+      expect(() => Duration.zero().add(null as any)).toThrow(TypeError);
+      expect(() => Duration.zero().subtract(null as any)).toThrow(TypeError);
+      expect(() => Duration.zero().isGreaterThan(null as any)).toThrow(TypeError);
+      expect(() => Duration.zero().isLessThan(null as any)).toThrow(TypeError);
+
+      expect(() => Duration.of(null as any)).toThrow(TypeError);
+      expect(() => Duration.of({ seconds: NaN })).toThrow(TypeError);
+      expect(() => Duration.of({ minutes: Infinity })).toThrow(TypeError);
+      expect(() => Duration.fromSeconds(NaN)).toThrow(TypeError);
+      expect(() => Duration.fromSeconds(Infinity)).toThrow(TypeError);
+      expect(() => Duration.fromSeconds('abc' as any)).toThrow(TypeError);
+      expect(() => Duration.of({ seconds: 'abc' as any })).toThrow(TypeError);
+      expect(() => Duration.fromMilliseconds(NaN)).toThrow(TypeError);
+      expect(() => Duration.fromNanoseconds(NaN)).toThrow(TypeError);
     });
 
     it('round-trips JSON serialization', () => {

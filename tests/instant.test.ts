@@ -264,10 +264,52 @@ describe('Instant Primitive', () => {
       expect(instNeg.toISOString()).toBe('2026-11-02T16:00:00.000Z');
     });
 
-    it('throws on invalid ISO strings', () => {
+    it('throws on invalid ISO strings and impossible calendar dates', () => {
       expect(() => Instant.fromISOString('not-a-date')).toThrow(RangeError);
       expect(() => Instant.fromISOString('2026-13-01T00:00:00Z')).toThrow(RangeError);
       expect(() => Instant.fromISOString('2026-01-32T00:00:00Z')).toThrow(RangeError);
+
+      // Month day limit validations
+      expect(() => Instant.fromISOString('2026-02-29T00:00:00Z')).toThrow(RangeError); // 2026 is not a leap year
+      expect(() => Instant.fromISOString('2026-02-30T00:00:00Z')).toThrow(RangeError);
+      expect(() => Instant.fromISOString('1900-02-29T00:00:00Z')).toThrow(RangeError); // 1900 not leap in Gregorian
+      expect(() => Instant.fromISOString('2023-02-29T00:00:00Z')).toThrow(RangeError);
+      expect(() => Instant.fromISOString('2026-04-31T00:00:00Z')).toThrow(RangeError); // April has 30 days
+      expect(() => Instant.fromISOString('2026-06-31T00:00:00Z')).toThrow(RangeError); // June has 30 days
+      expect(() => Instant.fromISOString('2026-09-31T00:00:00Z')).toThrow(RangeError); // September has 30 days
+      expect(() => Instant.fromISOString('2026-11-31T00:00:00Z')).toThrow(RangeError); // November has 30 days
+
+      // Negative zero year is forbidden
+      expect(() => Instant.fromISOString('-0000-01-01T00:00:00Z')).toThrow(RangeError);
+      expect(() => Instant.fromISOString('-000000-01-01T00:00:00Z')).toThrow(RangeError);
+
+      // Out-of-range timezone offsets
+      expect(() => Instant.fromISOString('2026-11-02T12:00:00+99:99')).toThrow(RangeError);
+      expect(() => Instant.fromISOString('2026-11-02T12:00:00+25:00')).toThrow(RangeError);
+      expect(() => Instant.fromISOString('2026-11-02T12:00:00+05:60')).toThrow(RangeError);
+
+      // Missing timezone designator or offset
+      expect(() => Instant.fromISOString('2026-11-02T12:00:00')).toThrow(RangeError);
+
+      // Time field out-of-range checks
+      expect(() => Instant.fromISOString('2026-11-02T25:00:00Z')).toThrow(RangeError);
+      expect(() => Instant.fromISOString('2026-11-02T12:65:00Z')).toThrow(RangeError);
+      expect(() => Instant.fromISOString('2026-11-02T12:00:61Z')).toThrow(RangeError);
+
+      // Leap second second-60 only valid at 23:59
+      expect(() => Instant.fromISOString('2026-11-02T12:00:60Z')).toThrow(RangeError);
+    });
+
+    it('parses valid leap years correctly', () => {
+      expect(Instant.fromISOString('2024-02-29T12:00:00Z').toISOString()).toBe('2024-02-29T12:00:00.000Z');
+      expect(Instant.fromISOString('2000-02-29T12:00:00Z').toISOString()).toBe('2000-02-29T12:00:00.000Z');
+      expect(Instant.fromISOString('1600-02-29T12:00:00Z').toISOString()).toBe('1600-02-29T12:00:00.000Z');
+    });
+
+    it('handles leap second clamping at 23:59:60', () => {
+      // 1972-06-30 leap second: clamped to second 59 per Unix epoch specification
+      const inst = Instant.fromISOString('1972-06-30T23:59:60Z');
+      expect(inst.toISOString()).toBe('1972-06-30T23:59:59.000Z');
     });
   });
 
@@ -291,6 +333,37 @@ describe('Instant Primitive', () => {
 
       const inst2 = Instant.fromJSON('2026-11-02T12:00:00.000Z');
       expect(inst2.toISOString()).toBe('2026-11-02T12:00:00.000Z');
+
+      // Negative decimal string (pre-1970 timestamp)
+      const instNeg = Instant.fromJSON('-1000');
+      expect(instNeg.epochNanoseconds).toBe(-1000n);
+
+      const instNegEpoch = Instant.fromJSON('-86400000000000');
+      expect(instNegEpoch.epochNanoseconds).toBe(-86400000000000n);
+
+      // With explicit plus
+      const instPlus = Instant.fromJSON('+5000');
+      expect(instPlus.epochNanoseconds).toBe(5000n);
+    });
+
+    it('safe equals and comparison methods against null and invalid instances', () => {
+      expect(Instant.EPOCH.equals(null)).toBe(false);
+      expect(Instant.EPOCH.equals(undefined)).toBe(false);
+      expect(Instant.EPOCH.equals('0')).toBe(false);
+      expect(Instant.EPOCH.equals({})).toBe(false);
+
+      expect(() => Instant.EPOCH.compareTo(null as any)).toThrow(TypeError);
+      expect(() => Instant.EPOCH.add(null as any)).toThrow(TypeError);
+      expect(() => Instant.EPOCH.subtract(null as any)).toThrow(TypeError);
+      expect(() => Instant.EPOCH.diff(null as any)).toThrow(TypeError);
+      expect(() => Instant.EPOCH.until(null as any)).toThrow(TypeError);
+      expect(() => Instant.EPOCH.isBefore(null as any)).toThrow(TypeError);
+      expect(() => Instant.EPOCH.isAfter(null as any)).toThrow(TypeError);
+
+      expect(() => Instant.fromEpochMilliseconds(NaN)).toThrow(TypeError);
+      expect(() => Instant.fromEpochMilliseconds(Infinity)).toThrow(TypeError);
+      expect(() => Instant.fromEpochSeconds(NaN)).toThrow(TypeError);
+      expect(() => Instant.fromEpochMicroseconds(NaN)).toThrow(TypeError);
     });
   });
 

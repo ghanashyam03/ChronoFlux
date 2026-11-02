@@ -34,6 +34,32 @@ function daysToCivil(z: bigint): { year: bigint; month: number; day: number } {
   return { year: y + (m <= 2 ? 1n : 0n), month: m, day: d };
 }
 
+function isLeapYear(y: bigint): boolean {
+  return (y % 4n === 0n && y % 100n !== 0n) || (y % 400n === 0n);
+}
+
+function daysInCivilMonth(y: bigint, m: number): number {
+  switch (m) {
+    case 1:
+    case 3:
+    case 5:
+    case 7:
+    case 8:
+    case 10:
+    case 12:
+      return 31;
+    case 4:
+    case 6:
+    case 9:
+    case 11:
+      return 30;
+    case 2:
+      return isLeapYear(y) ? 29 : 28;
+    default:
+      return 0;
+  }
+}
+
 function civilToDays(y: bigint, m: number, d: number): bigint {
   y -= m <= 2 ? 1n : 0n;
   const era = (y >= 0n ? y : y - 399n) / 400n;
@@ -96,16 +122,25 @@ export class Instant {
   }
 
   static fromEpochMicroseconds(epochMicroseconds: bigint | number): Instant {
+    if (typeof epochMicroseconds === 'number' && !Number.isFinite(epochMicroseconds)) {
+      throw new TypeError(`epochMicroseconds must be a finite number or bigint, received: ${epochMicroseconds}`);
+    }
     const us = typeof epochMicroseconds === 'bigint' ? epochMicroseconds : BigInt(Math.trunc(epochMicroseconds));
     return new Instant(us * NANOSECONDS_PER_MICROSECOND);
   }
 
   static fromEpochMilliseconds(epochMilliseconds: number | bigint): Instant {
+    if (typeof epochMilliseconds === 'number' && !Number.isFinite(epochMilliseconds)) {
+      throw new TypeError(`epochMilliseconds must be a finite number or bigint, received: ${epochMilliseconds}`);
+    }
     const ms = typeof epochMilliseconds === 'bigint' ? epochMilliseconds : BigInt(Math.trunc(epochMilliseconds));
     return new Instant(ms * NANOSECONDS_PER_MILLISECOND);
   }
 
   static fromEpochSeconds(epochSeconds: number | bigint): Instant {
+    if (typeof epochSeconds === 'number' && !Number.isFinite(epochSeconds)) {
+      throw new TypeError(`epochSeconds must be a finite number or bigint, received: ${epochSeconds}`);
+    }
     const s = typeof epochSeconds === 'bigint' ? epochSeconds : BigInt(Math.trunc(epochSeconds));
     return new Instant(s * NANOSECONDS_PER_SECOND);
   }
@@ -199,8 +234,8 @@ export class Instant {
   /**
    * Adapter: Converts this Instant to a TC39 Temporal.Instant if supported in the runtime.
    */
-  toTemporalInstant(): any {
-    const globalTemporal = (globalThis as any).Temporal;
+  toTemporalInstant(temporalObj?: any): any {
+    const globalTemporal = temporalObj ?? (globalThis as any).Temporal;
     if (globalTemporal && typeof globalTemporal.Instant?.fromEpochNanoseconds === 'function') {
       return globalTemporal.Instant.fromEpochNanoseconds(this.epochNanoseconds);
     }
@@ -210,14 +245,23 @@ export class Instant {
   // --- Exact Arithmetic ---
 
   add(duration: Duration): Instant {
+    if (!(duration instanceof Duration)) {
+      throw new TypeError('Expected a Duration instance in Instant.add');
+    }
     return new Instant(this.epochNanoseconds + duration.nanoseconds);
   }
 
   subtract(duration: Duration): Instant {
+    if (!(duration instanceof Duration)) {
+      throw new TypeError('Expected a Duration instance in Instant.subtract');
+    }
     return new Instant(this.epochNanoseconds - duration.nanoseconds);
   }
 
   diff(other: Instant): Duration {
+    if (!(other instanceof Instant)) {
+      throw new TypeError('Expected an Instant instance in Instant.diff');
+    }
     return new Duration(this.epochNanoseconds - other.epochNanoseconds);
   }
 
@@ -226,34 +270,55 @@ export class Instant {
   }
 
   until(other: Instant): Duration {
+    if (!(other instanceof Instant)) {
+      throw new TypeError('Expected an Instant instance in Instant.until');
+    }
     return other.diff(this);
   }
 
   // --- Comparisons ---
 
   compareTo(other: Instant): number {
+    if (!(other instanceof Instant)) {
+      throw new TypeError('Expected an Instant instance for comparison');
+    }
     if (this.epochNanoseconds < other.epochNanoseconds) return -1;
     if (this.epochNanoseconds > other.epochNanoseconds) return 1;
     return 0;
   }
 
-  equals(other: Instant): boolean {
+  equals(other: unknown): boolean {
+    if (!(other instanceof Instant)) {
+      return false;
+    }
     return this.epochNanoseconds === other.epochNanoseconds;
   }
 
   isBefore(other: Instant): boolean {
+    if (!(other instanceof Instant)) {
+      throw new TypeError('Expected an Instant instance');
+    }
     return this.epochNanoseconds < other.epochNanoseconds;
   }
 
   isAfter(other: Instant): boolean {
+    if (!(other instanceof Instant)) {
+      throw new TypeError('Expected an Instant instance');
+    }
     return this.epochNanoseconds > other.epochNanoseconds;
   }
 
   isBeforeOrEqual(other: Instant): boolean {
+    if (!(other instanceof Instant)) {
+      throw new TypeError('Expected an Instant instance');
+    }
     return this.epochNanoseconds <= other.epochNanoseconds;
   }
 
   isAfterOrEqual(other: Instant): boolean {
+    if (!(other instanceof Instant)) {
+      throw new TypeError('Expected an Instant instance');
+    }
     return this.epochNanoseconds >= other.epochNanoseconds;
   }
 
@@ -329,11 +394,13 @@ export class Instant {
 
   static fromJSON(json: InstantJSON | string): Instant {
     if (typeof json === 'string') {
-      // Check if it's an ISO-8601 string or decimal nanoseconds
-      if (json.includes('T') || json.includes('-') || json.endsWith('Z')) {
-        return Instant.fromISOString(json);
+      const trimmed = json.trim();
+      // If it is a signed decimal integer string (pure digits with optional leading +/-), parse as epoch nanoseconds
+      if (/^[+-]?\d+$/.test(trimmed)) {
+        return new Instant(BigInt(trimmed));
       }
-      return new Instant(BigInt(json));
+      // Otherwise parse as an ISO-8601 string
+      return Instant.fromISOString(trimmed);
     }
     if (typeof json === 'object' && json !== null && 'epochNanoseconds' in json) {
       return new Instant(BigInt(json.epochNanoseconds));
@@ -354,7 +421,8 @@ export class Instant {
       throw new RangeError(`Invalid ISO-8601 instant string: "${isoString}"`);
     }
 
-    const year = BigInt(match[1]!);
+    const yearRaw = match[1]!;
+    const year = BigInt(yearRaw);
     const month = parseInt(match[2]!, 10);
     const day = parseInt(match[3]!, 10);
     const hours = BigInt(match[4]!);
@@ -362,8 +430,31 @@ export class Instant {
     const seconds = BigInt(match[6]!);
     const subSecRaw = match[7];
 
-    if (month < 1 || month > 12 || day < 1 || day > 31 || hours > 23n || minutes > 59n || seconds > 60n) {
-      throw new RangeError(`Out-of-range calendar field in ISO string: "${isoString}"`);
+    // TC39 / ISO 8601-2: negative zero year (-0000 or -000000) is forbidden
+    if (yearRaw.startsWith('-') && year === 0n) {
+      throw new RangeError(`Invalid ISO-8601 instant string: negative zero year is forbidden: "${isoString}"`);
+    }
+
+    if (month < 1 || month > 12) {
+      throw new RangeError(`Out-of-range month (${month}) in ISO string: "${isoString}"`);
+    }
+
+    const maxDays = daysInCivilMonth(year, month);
+    if (day < 1 || day > maxDays) {
+      throw new RangeError(`Out-of-range day (${day}) for month ${month} in year ${year} in ISO string: "${isoString}"`);
+    }
+
+    if (hours > 23n || minutes > 59n) {
+      throw new RangeError(`Out-of-range time field in ISO string: "${isoString}"`);
+    }
+
+    // Second 60 represents a leap second; only legal at 23:59 per RFC 3339 / TC39 Temporal
+    if (seconds === 60n) {
+      if (hours !== 23n || minutes !== 59n) {
+        throw new RangeError(`Second 60 (leap second) is only valid at 23:59 in ISO string: "${isoString}"`);
+      }
+    } else if (seconds > 59n) {
+      throw new RangeError(`Out-of-range seconds (${seconds}) in ISO string: "${isoString}"`);
     }
 
     let subSecNs = 0n;
@@ -372,21 +463,30 @@ export class Instant {
       subSecNs = BigInt(padded);
     }
 
+    // Unix epoch ignores leap seconds per POSIX and TC39 Temporal: clamp second 60 to second 59
+    const effectiveSeconds = seconds === 60n ? 59n : seconds;
+
     const days = civilToDays(year, month, day);
     const localNs =
       days * NANOSECONDS_PER_DAY +
       hours * NANOSECONDS_PER_HOUR +
       minutes * NANOSECONDS_PER_MINUTE +
-      seconds * NANOSECONDS_PER_SECOND +
+      effectiveSeconds * NANOSECONDS_PER_SECOND +
       subSecNs;
 
-    // Timezone offset
+    // Timezone offset validation: instant requires UTC designator 'Z' or explicit offset [+-]HH:MM
     let offsetNs = 0n;
     if (match[8] === undefined) {
-      // Has offset
+      if (match[9] === undefined) {
+        throw new RangeError(`ISO-8601 instant string must include a UTC designator 'Z' or offset: "${isoString}"`);
+      }
       const sign = match[9] === '-' ? -1n : 1n;
       const offH = match[10] ? BigInt(match[10]) : 0n;
       const offM = match[11] ? BigInt(match[11]) : 0n;
+
+      if (offH > 23n || offM > 59n) {
+        throw new RangeError(`Timezone offset out of range in ISO string: "${isoString}"`);
+      }
       offsetNs = sign * (offH * NANOSECONDS_PER_HOUR + offM * NANOSECONDS_PER_MINUTE);
     }
 

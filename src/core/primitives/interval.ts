@@ -6,6 +6,7 @@
 import { AllenRelation } from './allen.js';
 import { Duration } from './duration.js';
 import { Instant } from './instant.js';
+import { IntervalSet } from './interval-set.js';
 import { IntervalJSON } from './types.js';
 
 /**
@@ -55,6 +56,9 @@ export class Interval {
    * Evaluates whether an instant falls within this half-open interval: start <= t < end.
    */
   contains(instant: Instant): boolean {
+    if (!(instant instanceof Instant)) {
+      throw new TypeError('Expected an Instant instance in Interval.contains');
+    }
     return this.start.isBeforeOrEqual(instant) && instant.isBefore(this.end);
   }
 
@@ -63,6 +67,9 @@ export class Interval {
    * this.start <= other.start && other.end <= this.end.
    */
   encloses(other: Interval): boolean {
+    if (!(other instanceof Interval)) {
+      throw new TypeError('Expected an Interval instance in Interval.encloses');
+    }
     return this.start.isBeforeOrEqual(other.start) && other.end.isBeforeOrEqual(this.end);
   }
 
@@ -71,6 +78,9 @@ export class Interval {
    * this.end === other.start || other.end === this.start.
    */
   isAdjacent(other: Interval): boolean {
+    if (!(other instanceof Interval)) {
+      throw new TypeError('Expected an Interval instance in Interval.isAdjacent');
+    }
     return this.end.equals(other.start) || other.end.equals(this.start);
   }
 
@@ -79,6 +89,9 @@ export class Interval {
    * max(start_A, start_B) < min(end_A, end_B).
    */
   overlaps(other: Interval): boolean {
+    if (!(other instanceof Interval)) {
+      throw new TypeError('Expected an Interval instance in Interval.overlaps');
+    }
     const maxStart = this.start.isAfter(other.start) ? this.start : other.start;
     const minEnd = this.end.isBefore(other.end) ? this.end : other.end;
     return maxStart.isBefore(minEnd);
@@ -88,6 +101,9 @@ export class Interval {
    * Returns the intersection of this interval with another, or null if disjoint or adjacent.
    */
   intersect(other: Interval): Interval | null {
+    if (!(other instanceof Interval)) {
+      throw new TypeError('Expected an Interval instance in Interval.intersect');
+    }
     const maxStart = this.start.isAfter(other.start) ? this.start : other.start;
     const minEnd = this.end.isBefore(other.end) ? this.end : other.end;
     if (maxStart.isBefore(minEnd)) {
@@ -97,15 +113,27 @@ export class Interval {
   }
 
   /**
+   * Returns the intersection of this interval with another as an IntervalSet.
+   * If the intervals do not intersect, returns an empty IntervalSet (IntervalSet.empty()).
+   */
+  intersection(other: Interval): IntervalSet {
+    const iv = this.intersect(other);
+    return iv ? IntervalSet.fromInterval(iv) : IntervalSet.empty();
+  }
+
+  /**
    * Returns the minimal continuous interval that encompasses both intervals.
    */
   span(other: Interval): Interval {
+    if (!(other instanceof Interval)) {
+      throw new TypeError('Expected an Interval instance in Interval.span');
+    }
     const minStart = this.start.isBefore(other.start) ? this.start : other.start;
     const maxEnd = this.end.isAfter(other.end) ? this.end : other.end;
     return new Interval(minStart, maxEnd);
   }
 
-  equals(other: Interval): boolean {
+  equals(other: unknown): boolean {
     if (!(other instanceof Interval)) return false;
     return this.start.equals(other.start) && this.end.equals(other.end);
   }
@@ -117,6 +145,9 @@ export class Interval {
    * and the other interval (B).
    */
   relationTo(other: Interval): AllenRelation {
+    if (!(other instanceof Interval)) {
+      throw new TypeError('Expected an Interval instance in Interval.relationTo');
+    }
     const sA = this.start.epochNanoseconds;
     const eA = this.end.epochNanoseconds;
     const sB = other.start.epochNanoseconds;
@@ -145,19 +176,35 @@ export class Interval {
   }
 
   isBefore(other: Interval): boolean {
+    if (!(other instanceof Interval)) throw new TypeError('Expected an Interval instance');
     return this.end.isBefore(other.start);
   }
 
+  before(other: Interval): boolean {
+    return this.isBefore(other);
+  }
+
   isAfter(other: Interval): boolean {
+    if (!(other instanceof Interval)) throw new TypeError('Expected an Interval instance');
     return this.start.isAfter(other.end);
   }
 
+  after(other: Interval): boolean {
+    return this.isAfter(other);
+  }
+
   meets(other: Interval): boolean {
+    if (!(other instanceof Interval)) throw new TypeError('Expected an Interval instance');
     return this.end.equals(other.start);
   }
 
   isMetBy(other: Interval): boolean {
+    if (!(other instanceof Interval)) throw new TypeError('Expected an Interval instance');
     return this.start.equals(other.end);
+  }
+
+  metBy(other: Interval): boolean {
+    return this.isMetBy(other);
   }
 
   overlapsRelation(other: Interval): boolean {
@@ -168,12 +215,20 @@ export class Interval {
     return this.relationTo(other) === 'overlappedBy';
   }
 
+  overlappedBy(other: Interval): boolean {
+    return this.isOverlappedBy(other);
+  }
+
   starts(other: Interval): boolean {
     return this.relationTo(other) === 'starts';
   }
 
   isStartedBy(other: Interval): boolean {
     return this.relationTo(other) === 'startedBy';
+  }
+
+  startedBy(other: Interval): boolean {
+    return this.isStartedBy(other);
   }
 
   during(other: Interval): boolean {
@@ -190,6 +245,10 @@ export class Interval {
 
   isFinishedBy(other: Interval): boolean {
     return this.relationTo(other) === 'finishedBy';
+  }
+
+  finishedBy(other: Interval): boolean {
+    return this.isFinishedBy(other);
   }
 
   // --- Serialization ---

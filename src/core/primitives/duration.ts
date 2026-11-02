@@ -34,6 +34,17 @@ export interface DurationFields {
   readonly nanoseconds?: number | bigint;
 }
 
+function toBigIntValue(val: bigint | number, name: string): bigint {
+  if (typeof val === 'bigint') return val;
+  if (typeof val === 'number') {
+    if (!Number.isFinite(val)) {
+      throw new TypeError(`${name} must be a finite number or bigint, received: ${val}`);
+    }
+    return BigInt(Math.trunc(val));
+  }
+  throw new TypeError(`${name} must be a number or bigint, received: ${typeof val}`);
+}
+
 /**
  * Duration represents a signed, physical elapsed time displacement in SI seconds/nanoseconds.
  *
@@ -61,61 +72,58 @@ export class Duration {
   }
 
   static fromNanoseconds(ns: bigint | number): Duration {
-    return new Duration(typeof ns === 'bigint' ? ns : BigInt(Math.trunc(ns)));
+    return new Duration(toBigIntValue(ns, 'nanoseconds'));
   }
 
   static fromMicroseconds(us: bigint | number): Duration {
-    const val = typeof us === 'bigint' ? us : BigInt(Math.trunc(us));
-    return new Duration(val * NANOSECONDS_PER_MICROSECOND);
+    return new Duration(toBigIntValue(us, 'microseconds') * NANOSECONDS_PER_MICROSECOND);
   }
 
   static fromMilliseconds(ms: bigint | number): Duration {
-    const val = typeof ms === 'bigint' ? ms : BigInt(Math.trunc(ms));
-    return new Duration(val * NANOSECONDS_PER_MILLISECOND);
+    return new Duration(toBigIntValue(ms, 'milliseconds') * NANOSECONDS_PER_MILLISECOND);
   }
 
   static fromSeconds(s: bigint | number): Duration {
-    const val = typeof s === 'bigint' ? s : BigInt(Math.trunc(s));
-    return new Duration(val * NANOSECONDS_PER_SECOND);
+    return new Duration(toBigIntValue(s, 'seconds') * NANOSECONDS_PER_SECOND);
   }
 
   static fromMinutes(m: bigint | number): Duration {
-    const val = typeof m === 'bigint' ? m : BigInt(Math.trunc(m));
-    return new Duration(val * NANOSECONDS_PER_MINUTE);
+    return new Duration(toBigIntValue(m, 'minutes') * NANOSECONDS_PER_MINUTE);
   }
 
   static fromHours(h: bigint | number): Duration {
-    const val = typeof h === 'bigint' ? h : BigInt(Math.trunc(h));
-    return new Duration(val * NANOSECONDS_PER_HOUR);
+    return new Duration(toBigIntValue(h, 'hours') * NANOSECONDS_PER_HOUR);
   }
 
   static fromDays(d: bigint | number): Duration {
-    const val = typeof d === 'bigint' ? d : BigInt(Math.trunc(d));
-    return new Duration(val * NANOSECONDS_PER_DAY);
+    return new Duration(toBigIntValue(d, 'days') * NANOSECONDS_PER_DAY);
   }
 
   static of(fields: DurationFields): Duration {
+    if (typeof fields !== 'object' || fields === null) {
+      throw new TypeError('Duration.of requires a valid non-null fields object');
+    }
     let total = 0n;
     if (fields.days !== undefined) {
-      total += (typeof fields.days === 'bigint' ? fields.days : BigInt(Math.trunc(fields.days))) * NANOSECONDS_PER_DAY;
+      total += toBigIntValue(fields.days, 'days') * NANOSECONDS_PER_DAY;
     }
     if (fields.hours !== undefined) {
-      total += (typeof fields.hours === 'bigint' ? fields.hours : BigInt(Math.trunc(fields.hours))) * NANOSECONDS_PER_HOUR;
+      total += toBigIntValue(fields.hours, 'hours') * NANOSECONDS_PER_HOUR;
     }
     if (fields.minutes !== undefined) {
-      total += (typeof fields.minutes === 'bigint' ? fields.minutes : BigInt(Math.trunc(fields.minutes))) * NANOSECONDS_PER_MINUTE;
+      total += toBigIntValue(fields.minutes, 'minutes') * NANOSECONDS_PER_MINUTE;
     }
     if (fields.seconds !== undefined) {
-      total += (typeof fields.seconds === 'bigint' ? fields.seconds : BigInt(Math.trunc(fields.seconds))) * NANOSECONDS_PER_SECOND;
+      total += toBigIntValue(fields.seconds, 'seconds') * NANOSECONDS_PER_SECOND;
     }
     if (fields.milliseconds !== undefined) {
-      total += (typeof fields.milliseconds === 'bigint' ? fields.milliseconds : BigInt(Math.trunc(fields.milliseconds))) * NANOSECONDS_PER_MILLISECOND;
+      total += toBigIntValue(fields.milliseconds, 'milliseconds') * NANOSECONDS_PER_MILLISECOND;
     }
     if (fields.microseconds !== undefined) {
-      total += (typeof fields.microseconds === 'bigint' ? fields.microseconds : BigInt(Math.trunc(fields.microseconds))) * NANOSECONDS_PER_MICROSECOND;
+      total += toBigIntValue(fields.microseconds, 'microseconds') * NANOSECONDS_PER_MICROSECOND;
     }
     if (fields.nanoseconds !== undefined) {
-      total += typeof fields.nanoseconds === 'bigint' ? fields.nanoseconds : BigInt(Math.trunc(fields.nanoseconds));
+      total += toBigIntValue(fields.nanoseconds, 'nanoseconds');
     }
     return new Duration(total);
   }
@@ -123,10 +131,16 @@ export class Duration {
   // --- Exact Arithmetic ---
 
   add(other: Duration): Duration {
+    if (!(other instanceof Duration)) {
+      throw new TypeError('Expected a Duration instance in Duration.add');
+    }
     return new Duration(this.nanoseconds + other.nanoseconds);
   }
 
   subtract(other: Duration): Duration {
+    if (!(other instanceof Duration)) {
+      throw new TypeError('Expected a Duration instance in Duration.subtract');
+    }
     return new Duration(this.nanoseconds - other.nanoseconds);
   }
 
@@ -139,12 +153,12 @@ export class Duration {
   }
 
   multiply(factor: bigint | number): Duration {
-    const factorBig = typeof factor === 'bigint' ? factor : BigInt(Math.trunc(factor));
+    const factorBig = toBigIntValue(factor, 'factor');
     return new Duration(this.nanoseconds * factorBig);
   }
 
   divide(divisor: bigint | number): { quotient: bigint; remainder: Duration } {
-    const divBig = typeof divisor === 'bigint' ? divisor : BigInt(Math.trunc(divisor));
+    const divBig = toBigIntValue(divisor, 'divisor');
     if (divBig === 0n) {
       throw new RangeError('Division by zero in Duration.divide');
     }
@@ -159,12 +173,18 @@ export class Duration {
   // --- Comparisons ---
 
   compareTo(other: Duration): number {
+    if (!(other instanceof Duration)) {
+      throw new TypeError('Expected a Duration instance for comparison');
+    }
     if (this.nanoseconds < other.nanoseconds) return -1;
     if (this.nanoseconds > other.nanoseconds) return 1;
     return 0;
   }
 
-  equals(other: Duration): boolean {
+  equals(other: unknown): boolean {
+    if (!(other instanceof Duration)) {
+      return false;
+    }
     return this.nanoseconds === other.nanoseconds;
   }
 
@@ -181,18 +201,22 @@ export class Duration {
   }
 
   isGreaterThan(other: Duration): boolean {
+    if (!(other instanceof Duration)) throw new TypeError('Expected a Duration instance');
     return this.nanoseconds > other.nanoseconds;
   }
 
   isLessThan(other: Duration): boolean {
+    if (!(other instanceof Duration)) throw new TypeError('Expected a Duration instance');
     return this.nanoseconds < other.nanoseconds;
   }
 
   isGreaterThanOrEqual(other: Duration): boolean {
+    if (!(other instanceof Duration)) throw new TypeError('Expected a Duration instance');
     return this.nanoseconds >= other.nanoseconds;
   }
 
   isLessThanOrEqual(other: Duration): boolean {
+    if (!(other instanceof Duration)) throw new TypeError('Expected a Duration instance');
     return this.nanoseconds <= other.nanoseconds;
   }
 
@@ -328,6 +352,21 @@ export class Duration {
     const match = /^([+-])?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(trimmed);
     if (!match) {
       throw new RangeError(`Invalid ISO-8601 duration string: "${isoString}"`);
+    }
+
+    const hasDays = match[2] !== undefined;
+    const hasHours = match[3] !== undefined;
+    const hasMinutes = match[4] !== undefined;
+    const hasSeconds = match[5] !== undefined;
+
+    // Must have at least one designator component
+    if (!hasDays && !hasHours && !hasMinutes && !hasSeconds) {
+      throw new RangeError(`Invalid ISO-8601 duration string (no components): "${isoString}"`);
+    }
+
+    // If 'T' appears in the string, it must be followed by at least one time component
+    if (trimmed.includes('T') && !hasHours && !hasMinutes && !hasSeconds) {
+      throw new RangeError(`Invalid ISO-8601 duration string ('T' without time components): "${isoString}"`);
     }
 
     const sign = match[1] === '-' ? -1n : 1n;

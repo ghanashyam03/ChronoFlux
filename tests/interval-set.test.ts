@@ -60,6 +60,23 @@ describe('IntervalSet Primitive & Set Algebra', () => {
 
       const disjointSet = IntervalSet.fromSortedDisjoint([a, b]);
       expect(disjointSet.equals(set)).toBe(true);
+
+      // Rejects adjacent intervals in fromSortedDisjoint
+      expect(() =>
+        IntervalSet.fromSortedDisjoint([new Interval(i0, i10), new Interval(i10, i20)])
+      ).toThrow(RangeError);
+
+      // Rejects overlapping intervals in fromSortedDisjoint
+      expect(() =>
+        IntervalSet.fromSortedDisjoint([new Interval(i0, i15), new Interval(i10, i20)])
+      ).toThrow(RangeError);
+
+      // Rejects reversed order intervals in fromSortedDisjoint
+      expect(() => IntervalSet.fromSortedDisjoint([b, a])).toThrow(RangeError);
+
+      // Rejects invalid types
+      expect(() => IntervalSet.fromSortedDisjoint(null as any)).toThrow(TypeError);
+      expect(() => IntervalSet.fromSortedDisjoint([null as any])).toThrow(TypeError);
     });
   });
 
@@ -213,6 +230,29 @@ describe('IntervalSet Primitive & Set Algebra', () => {
 
       expect(comp.count()).toBe(1);
       expect(comp.intervals[0]!.equals(within)).toBe(true);
+    });
+
+    it('safe equals and argument validation in IntervalSet', () => {
+      const set = IntervalSet.from([new Interval(i0, i10)]);
+      expect(set.equals(null)).toBe(false);
+      expect(set.equals(undefined)).toBe(false);
+      expect(set.equals({})).toBe(false);
+
+      // Same count but different intervals
+      const set2 = IntervalSet.from([new Interval(i0, i20)]);
+      expect(set.equals(set2)).toBe(false);
+
+      expect(() => set.contains(null as any)).toThrow(TypeError);
+      expect(() => set.encloses(null as any)).toThrow(TypeError);
+      expect(() => set.complement(null as any)).toThrow(TypeError);
+    });
+
+    it('difference with otherSet having interval strictly after current piece triggers fast break', () => {
+      const s1 = IntervalSet.fromInterval(new Interval(i0, i10));
+      const s2 = IntervalSet.fromInterval(new Interval(i20, i30));
+      // s2 is strictly after s1, so loop over s2 breaks immediately
+      const diff = s1.difference(s2);
+      expect(diff.equals(s1)).toBe(true);
     });
   });
 

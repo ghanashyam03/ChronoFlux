@@ -82,10 +82,20 @@ describe('Place Primitive', () => {
       const p1 = Place.create({ latitude: 51.5074, longitude: -0.1278, elevationMeters: 25, timeZoneId: 'Europe/London' });
       const p2 = Place.create({ latitude: 51.5074, longitude: -0.1278, elevationMeters: 25, timeZoneId: 'Europe/London' });
       const p3 = Place.create({ latitude: 51.5074, longitude: -0.1278, elevationMeters: 50, timeZoneId: 'Europe/London' });
+      const p4 = Place.create({ latitude: 51.5074, longitude: -0.1278, elevationMeters: 25, timeZoneId: 'UTC' });
 
       expect(p1.equals(p2)).toBe(true);
       expect(p1.equals(p3)).toBe(false);
-      expect(p1.equals(null as any)).toBe(false);
+      expect(p1.equals(p4)).toBe(false); // Different contextual timezone
+      expect(p1.equals(null)).toBe(false);
+      expect(p1.equals(undefined)).toBe(false);
+      expect(p1.equals({})).toBe(false);
+
+      // Geographic coordinate equivalence (ignoring contextual timeZoneId)
+      expect(p1.hasSameCoordinates(p4)).toBe(true);
+      expect(p1.hasSameCoordinates(p3)).toBe(false);
+      expect(p1.hasSameCoordinates(null)).toBe(false);
+      expect(p1.hasSameCoordinates(undefined)).toBe(false);
     });
 
     it('serializes to and from JSON', () => {

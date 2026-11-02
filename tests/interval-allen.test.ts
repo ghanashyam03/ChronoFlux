@@ -209,15 +209,67 @@ describe('Interval Primitive & Allen 13 Relations', () => {
       expect(inter).not.toBeNull();
       expect(inter!.start.equals(i10)).toBe(true);
       expect(inter!.end.equals(i15)).toBe(true);
+
+      // Testing intersection returning IntervalSet
+      const setInter = a.intersection(b);
+      expect(setInter.count()).toBe(1);
+      expect(setInter.intervals[0]!.equals(inter!)).toBe(true);
     });
 
-    it('returns null for intersection of disjoint or adjacent intervals', () => {
+    it('returns null for intersection of disjoint or adjacent intervals, and IntervalSet.empty()', () => {
       const a = new Interval(i0, i10);
       const b = new Interval(i10, i20); // Adjacent (meets)
       const c = new Interval(i20, i30); // Disjoint (before)
 
       expect(a.intersect(b)).toBeNull();
       expect(a.intersect(c)).toBeNull();
+
+      // Empty results represented as empty IntervalSet
+      expect(a.intersection(b).isEmpty()).toBe(true);
+      expect(a.intersection(c).isEmpty()).toBe(true);
+    });
+
+    it('verifies Allen relation aliases', () => {
+      const A = new Interval(i0, i10);
+      const B = new Interval(i20, i30);
+      expect(A.before(B)).toBe(true);
+      expect(B.after(A)).toBe(true);
+
+      const M1 = new Interval(i0, i10);
+      const M2 = new Interval(i10, i20);
+      expect(M2.metBy(M1)).toBe(true);
+
+      const S1 = new Interval(i0, i20);
+      const S2 = new Interval(i0, i10);
+      expect(S1.startedBy(S2)).toBe(true);
+
+      const F1 = new Interval(i0, i20);
+      const F2 = new Interval(i10, i20);
+      expect(F1.finishedBy(F2)).toBe(true);
+
+      const O1 = new Interval(i10, i25);
+      const O2 = new Interval(i0, i15);
+      expect(O1.overlappedBy(O2)).toBe(true);
+    });
+
+    it('safe equals and argument validation in Interval methods', () => {
+      const iv = new Interval(i0, i10);
+      expect(iv.equals(null)).toBe(false);
+      expect(iv.equals(undefined)).toBe(false);
+      expect(iv.equals({})).toBe(false);
+
+      expect(() => iv.contains(null as any)).toThrow(TypeError);
+      expect(() => iv.encloses(null as any)).toThrow(TypeError);
+      expect(() => iv.isAdjacent(null as any)).toThrow(TypeError);
+      expect(() => iv.overlaps(null as any)).toThrow(TypeError);
+      expect(() => iv.intersect(null as any)).toThrow(TypeError);
+      expect(() => iv.intersection(null as any)).toThrow(TypeError);
+      expect(() => iv.span(null as any)).toThrow(TypeError);
+      expect(() => iv.relationTo(null as any)).toThrow(TypeError);
+      expect(() => iv.isBefore(null as any)).toThrow(TypeError);
+      expect(() => iv.isAfter(null as any)).toThrow(TypeError);
+      expect(() => iv.meets(null as any)).toThrow(TypeError);
+      expect(() => iv.isMetBy(null as any)).toThrow(TypeError);
     });
 
     it('computes minimal span covering both intervals', () => {

@@ -88,7 +88,7 @@ export class Place {
     return new Place(options);
   }
 
-  equals(other: Place): boolean {
+  equals(other: unknown): boolean {
     if (!(other instanceof Place)) {
       return false;
     }
@@ -97,6 +97,21 @@ export class Place {
       this.longitude === other.longitude &&
       this.elevationMeters === other.elevationMeters &&
       this.timeZoneId === other.timeZoneId
+    );
+  }
+
+  /**
+   * Evaluates geographic equivalence on the WGS84 ellipsoid (latitude, longitude, elevationMeters),
+   * strictly ignoring contextual metadata such as timeZoneId.
+   */
+  hasSameCoordinates(other: unknown): boolean {
+    if (!(other instanceof Place)) {
+      return false;
+    }
+    return (
+      this.latitude === other.latitude &&
+      this.longitude === other.longitude &&
+      this.elevationMeters === other.elevationMeters
     );
   }
 
