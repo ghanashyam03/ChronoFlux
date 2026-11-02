@@ -4,3 +4,4 @@
  */
 
 export * from './primitives/index.js';
+export * from './models/index.js';

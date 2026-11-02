@@ -121,7 +121,15 @@ npm run build
   - Explicit leap-second semantics with authentic IERS date validation, non-zero offset rejection, and RFC 3339 compatibility mode.
   - Allen API naming separation (`intersects()` for generic intersection, `relationTo()` canonical for 13 relations, symmetric helper methods).
   - Comprehensive regression test suite (178/178 tests passing with 98.22% line coverage).
-- [ ] **Phase 2 — Solar & Civil Temporal Models**: Astronomical mechanics (Meeus/NOAA equations), elevation, azimuth, twilight regimes, polar night/midnight sun, and IANA timezone translation.
+- [x] **Phase 2 — Solar & Civil Temporal Models**:
+  - `TemporalModel<TState>` extensible interface and `ModelMetadata` with formal accuracy profile, resolution, margin of error, and validity range.
+  - High-precision Astronomical Solar Model (`src/core/models/solar/`) implementing Jean Meeus (*Astronomical Algorithms*, 2nd ed.) and NOAA Solar Calculator formulations.
+  - Geometric and apparent solar elevation, azimuth, zenith, solar noon/midnight, and Saemundsson / Bennett atmospheric refraction.
+  - Twilight regimes: civil ([-6°, -0.833°)), nautical ([-12°, -6°)), astronomical ([-18°, -12°)), night (< -18°), day (>= -0.833°).
+  - Robust Polar edge cases: Polar Day (`polar_day`, Midnight Sun) and Polar Night (`polar_night`) in Tromsø (69.65°N) and Svalbard (78.22°N) with zero NaN/crashes.
+  - Solar event locator API (`ChronoFlux.solar.nextEvent` and `findTransitions`).
+  - Civil Time Model (`src/core/models/civil/`) with IANA time zone support, UTC offsets, DST detection, and TC39-compliant DST transition disambiguation (`compatible`, `earlier`, `later`, `reject`).
+  - Comprehensive golden vector validation (50 NOAA benchmarks, < 0.02° error) and 214/214 passing unit tests (97.62% line coverage).
 - [ ] **Phase 3 — Temporal Conditions & Resolver**: Typed Condition AST, continuous root-finding/bisection, and explainable interval synthesis.
 - [ ] **Phase 4 — Developer SDK & Benchmarks**: Golden vector NOAA validation and public facade packaging.
 - [ ] **Phase 5 — Visual Diagnostic Suite**: Interactive spacetime ribbon, solar curves, and developer query console.

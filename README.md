@@ -37,6 +37,60 @@ ChronoFlux provides a mathematically rigorous, high-resolution temporal foundati
   - Difference ($A \setminus B$)
   - Bounded Complement ($\text{within} \setminus S$)
 
+### 6. Astronomical Solar Model (Jean Meeus / NOAA)
+- **High-Precision Equations**: Julian centuries ($T$), geometric mean anomaly, sun equation of center, apparent longitude, right ascension, declination ($\delta$), and equation of time ($EoT$).
+- **Refraction & Angles**: Saemundsson / Bennett atmospheric refraction correction, apparent and geometric elevation ($h \in [-90^\circ, +90^\circ]$), solar zenith angle ($90^\circ - h$), and solar azimuth angle ($[0^\circ, 360^\circ)$ clockwise from North).
+- **Solar Regimes**: Direct sunlight ($\ge -0.833^\circ$), Civil twilight ($[-6^\circ, -0.833^\circ)$), Nautical twilight ($[-12^\circ, -6^\circ)$), Astronomical twilight ($[-18^\circ, -12^\circ)$), and Night ($< -18^\circ$).
+- **Polar Edge Cases**: Graceful classification of Polar Day (Midnight Sun) and Polar Night in high latitudes (e.g. Tromsø $69.65^\circ$N and Svalbard $78.22^\circ$N) with zero NaN errors or exceptions.
+- **Event Locator**: Discrete event search via `ChronoFlux.solar.nextEvent` (`sunrise`, `sunset`, `solarNoon`, `solarMidnight`, `civilDawn`, `civilDusk`) and boundary transition solving via `findTransitions`.
+
+### 7. Civil Calendar & IANA Time Zone Model
+- **Wall-Clock Evaluation**: Local calendar state (`year`, `month`, `day`, `hour`, `minute`, `second`, `millisecond`, `nanosecond`) for any IANA timezone identifier.
+- **DST Disambiguation**: TC39-compliant resolution of civil wall-clock dates into unambiguous physical `Instant`s:
+  - Spring-forward skipped hours: `'compatible'` / `'later'` advances by gap, `'earlier'` moves before gap, `'reject'` throws `RangeError`.
+  - Fall-back repeated hours: `'compatible'` / `'earlier'` selects earlier EDT instance, `'later'` selects later EST instance, `'reject'` throws `RangeError`.
+- **Zero Heavy Dependencies**: Leverages ECMAScript `Intl.DateTimeFormat` and native `Temporal` engines with deterministic fallback.
+
+---
+
+## Developer API Example
+
+```typescript
+import { ChronoFlux } from '@chronoflux/core';
+
+// 1. Instants & Geodetic Coordinates
+const now = ChronoFlux.now();
+const tokyo = ChronoFlux.place({ latitude: 35.6762, longitude: 139.6503, timeZoneId: 'Asia/Tokyo' });
+
+// 2. Astronomical Solar State
+const solar = ChronoFlux.solar.evaluate(now, tokyo);
+console.log(`Solar elevation: ${solar.elevationDeg.toFixed(2)}° (${solar.phase})`);
+console.log(`Solar azimuth: ${solar.azimuthDeg.toFixed(2)}°`);
+
+// 3. Solar Event Finder
+const nextSunrise = ChronoFlux.solar.nextEvent({
+  event: 'sunrise',
+  place: tokyo,
+  after: now,
+});
+console.log(`Next sunrise: ${nextSunrise?.toISOString()}`);
+
+// 4. Civil Time & DST Disambiguation
+const civil = ChronoFlux.civil.evaluate(now, tokyo);
+console.log(`Tokyo Local Time: ${civil.year}-${civil.month}-${civil.day} ${civil.hour}:${civil.minute}`);
+
+// Disambiguate Daylight Saving Time transitions
+const instant = ChronoFlux.civil.resolve({
+  year: 2026,
+  month: 3,
+  day: 8,
+  hour: 2,
+  minute: 30,
+  timeZoneId: 'America/New_York',
+  disambiguation: 'compatible', // Automatically advances past skipped spring-forward hour
+});
+```
+
 ---
 
 ## Installation & Testing
@@ -47,3 +101,4 @@ npm test
 npm run test:coverage
 npm run build
 ```
+
