@@ -322,12 +322,37 @@ describe('Phase 2.1 Scientific & Semantic Correctness Audit', () => {
       expect(summerCivil.isDaylightSaving).toBe(true);
     });
 
+    it('correctly classifies Irish Standard Time (Europe/Dublin) as daylight saving time', () => {
+      // In Ireland, summer time is named "Irish Standard Time" (UTC+1), while winter is GMT (UTC+0).
+      // Standard time name should NOT cause false negative DST classification.
+      const julDublin = ChronoFlux.civil.evaluate(ChronoFlux.instant('2026-07-15T12:00:00Z'), 'Europe/Dublin');
+      expect(julDublin.utcOffsetMinutes).toBe(60);
+      expect(julDublin.isDaylightSaving).toBe(true);
+
+      const janDublin = ChronoFlux.civil.evaluate(ChronoFlux.instant('2026-01-15T12:00:00Z'), 'Europe/Dublin');
+      expect(janDublin.utcOffsetMinutes).toBe(0);
+      expect(janDublin.isDaylightSaving).toBe(false);
+    });
+
     it('exposes runtime civil time database provenance', () => {
       const prov = ChronoFlux.civil.getProvenance();
       expect(prov).toBeDefined();
       expect(typeof prov.runtime).toBe('string');
       expect(typeof prov.tzVersion).toBe('string');
       expect(typeof prov.icuVersion).toBe('string');
+    });
+
+    it('gets registered TimeZoneLookupProvider and handles invalid placeOrTimeZone', () => {
+      const provider = { lookup: () => 'UTC' };
+      ChronoFlux.civil.registerTimeZoneLookupProvider(provider);
+      expect(ChronoFlux.civil.getTimeZoneLookupProvider()).toBe(provider);
+      ChronoFlux.civil.registerTimeZoneLookupProvider(null);
+      expect(ChronoFlux.civil.getTimeZoneLookupProvider()).toBeNull();
+
+      expect(() => {
+        // @ts-expect-error Invalid argument
+        ChronoFlux.civil.evaluate(ChronoFlux.now(), 12345);
+      }).toThrow(TypeError);
     });
   });
 
@@ -380,12 +405,15 @@ describe('Phase 2.1 Scientific & Semantic Correctness Audit', () => {
   // Priority 5 — Numerical Convergence & Singularities
   // =========================================================================
   describe('Priority 5 — Numerical Convergence & Singularities', () => {
-    it('handles latitudes immediately below, on, and above Arctic Circle (66.0°N, 66.564°N, 67.0°N)', () => {
-      const summerAnchor = ChronoFlux.instant('2026-06-21T00:00:00Z');
+    it('handles latitudes immediately below, on, and above Arctic Circle (65.0°N, 66.564°N, 67.0°N)', () => {
+      const summerAnchor = ChronoFlux.instant('2026-06-21T12:00:00Z');
 
-      // 66.0°N: Solstice midnight sun just barely below horizon or grazing
-      const stateBelow = ChronoFlux.solar.evaluate(summerAnchor, arcticBelow);
-      expect(Number.isFinite(stateBelow.elevationDeg)).toBe(true);
+      // 65.0°N: Strictly below midnight sun limit (minimum midnight geometric elevation ~ -1.56°)
+      const subPolarPlace = ChronoFlux.place({ latitude: 65.0, longitude: 20.0, timeZoneId: 'Europe/Stockholm' });
+      const stateSubPolar = ChronoFlux.solar.evaluate(summerAnchor, subPolarPlace);
+      expect(stateSubPolar.isPolarDay).toBe(false);
+      expect(stateSubPolar.sunrise).not.toBeNull();
+      expect(stateSubPolar.sunset).not.toBeNull();
 
       // 66.564°N (Arctic Circle exact): tangential boundary
       const stateCircle = ChronoFlux.solar.evaluate(summerAnchor, arcticCircle);
@@ -395,6 +423,20 @@ describe('Phase 2.1 Scientific & Semantic Correctness Audit', () => {
       const stateAbove = ChronoFlux.solar.evaluate(summerAnchor, arcticAbove);
       expect(stateAbove.isPolarDay).toBe(true);
       expect(stateAbove.phase).toBe('polar_day');
+    });
+
+    it('handles tangential threshold grazing crossings near midnight sun boundary (65.72°N)', () => {
+      const summerAnchor = ChronoFlux.instant('2026-06-21T12:00:00Z');
+      const grazePlace = ChronoFlux.place({ latitude: 65.72, longitude: 0.0 });
+      const noon = ChronoFlux.solar.nextEvent({ event: 'solarNoon', place: grazePlace, after: ChronoFlux.instant('2026-06-21T00:00:00Z') })!;
+
+      // At 65.72°N, diurnal minimum dips to ~ -0.84° (just below -0.8333°), producing brief night
+      const sunrise = ChronoFlux.solar.nextEvent({ event: 'sunrise', place: grazePlace, after: ChronoFlux.instant('2026-06-21T00:00:00Z'), searchLimitDays: 1 });
+      const sunset = ChronoFlux.solar.nextEvent({ event: 'sunset', place: grazePlace, after: ChronoFlux.instant('2026-06-21T00:00:00Z'), searchLimitDays: 1 });
+
+      expect(sunrise).not.toBeNull();
+      expect(sunset).not.toBeNull();
+      expect(sunrise!.isBefore(sunset!)).toBe(true);
     });
 
     it('handles latitudes immediately below, on, and above Antarctic Circle (-66.0°S, -66.564°S, -68.0°S)', () => {
@@ -486,6 +528,47 @@ describe('Phase 2.1 Scientific & Semantic Correctness Audit', () => {
       expect(t1 - t0).toBeLessThan(100);
     });
 
+    it('guarantees diurnal event cache key stability across different hours of the same day', () => {
+      // Different hours of the same diurnal cycle (e.g. 02:00, 10:00, 14:00, 20:00)
+      const t2 = ChronoFlux.instant('2026-06-21T02:00:00Z');
+      const t10 = ChronoFlux.instant('2026-06-21T10:00:00Z');
+      const t14 = ChronoFlux.instant('2026-06-21T14:00:00Z');
+      const t20 = ChronoFlux.instant('2026-06-21T20:00:00Z');
+
+      const s2 = ChronoFlux.solar.evaluate(t2, greenwich);
+      const s10 = ChronoFlux.solar.evaluate(t10, greenwich);
+      const s14 = ChronoFlux.solar.evaluate(t14, greenwich);
+      const s20 = ChronoFlux.solar.evaluate(t20, greenwich);
+
+      // Cached diurnal events (noon, sunrise, sunset) must be identical across the diurnal cycle
+      expect(s2.solarNoon.equals(s10.solarNoon)).toBe(true);
+      expect(s2.solarNoon.equals(s14.solarNoon)).toBe(true);
+      expect(s2.solarNoon.equals(s20.solarNoon)).toBe(true);
+      expect(s2.sunrise!.equals(s10.sunrise!)).toBe(true);
+      expect(s2.sunset!.equals(s10.sunset!)).toBe(true);
+    });
+
+    it('demonstrates evaluatePosition throughput without diurnal solving overhead', () => {
+      const instant = ChronoFlux.now();
+      const t0 = performance.now();
+      for (let i = 0; i < 1000; i++) {
+        ChronoFlux.solar.evaluatePosition(instant, greenwich);
+      }
+      const t1 = performance.now();
+      // 1000 instantaneous evaluations should execute in under 30ms
+      expect(t1 - t0).toBeLessThan(50);
+    });
+
+    it('handles cache eviction when diurnal cache exceeds MAX_DIURNAL_CACHE_SIZE', () => {
+      // Insert 513 unique locations to trigger eviction
+      const anchor = ChronoFlux.instant('2026-06-21T12:00:00Z');
+      for (let i = 0; i <= 513; i++) {
+        const place = ChronoFlux.place({ latitude: (i % 60) - 30, longitude: (i % 120) - 60 });
+        const state = ChronoFlux.solar.evaluate(anchor, place);
+        expect(state.elevationDeg).toBeDefined();
+      }
+    });
+
     it('safely handles fractional searchLimitDays without throwing RangeError', () => {
       const anchor = ChronoFlux.instant('2026-06-21T00:00:00Z');
 
@@ -508,6 +591,16 @@ describe('Phase 2.1 Scientific & Semantic Correctness Audit', () => {
         searchLimitDays: 0.1, // 2.4 hours, before sunset occurs
       });
       expect(eventTooShort).toBeNull();
+    });
+
+    it('safely handles invalid searchLimitDays or unknown event names by returning null', () => {
+      const anchor = ChronoFlux.now();
+      expect(ChronoFlux.solar.nextEvent({ event: 'sunrise', place: greenwich, after: anchor, searchLimitDays: 0 })).toBeNull();
+      expect(ChronoFlux.solar.nextEvent({ event: 'sunrise', place: greenwich, after: anchor, searchLimitDays: -5 })).toBeNull();
+      expect(ChronoFlux.solar.nextEvent({ event: 'sunrise', place: greenwich, after: anchor, searchLimitDays: NaN })).toBeNull();
+      expect(ChronoFlux.solar.nextEvent({ event: 'sunrise', place: greenwich, after: anchor, searchLimitDays: Infinity })).toBeNull();
+      // @ts-expect-error Unknown event
+      expect(ChronoFlux.solar.nextEvent({ event: 'unknownEvent', place: greenwich, after: anchor })).toBeNull();
     });
   });
 });

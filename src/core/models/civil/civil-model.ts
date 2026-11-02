@@ -178,7 +178,8 @@ function isDstActive(epochMs: number, currentOffsetMs: number, timeZoneId: strin
       if (/daylight|summer/i.test(tzNamePart)) {
         return true;
       }
-      if (/standard/i.test(tzNamePart)) {
+      // Note: "Irish Standard Time" (Europe/Dublin) is statutory summer daylight saving time (UTC+1 vs winter GMT UTC+0).
+      if (/standard/i.test(tzNamePart) && !/irish/i.test(tzNamePart)) {
         return false;
       }
     }

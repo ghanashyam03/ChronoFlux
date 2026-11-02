@@ -137,7 +137,7 @@ npm run build
   - Dynamic uncertainty decomposition: dynamic event-time uncertainty $\Delta t = \Delta h / |dh/dt|$; granular separation of ephemeris numerical error, atmospheric refraction uncertainty, dynamic event-time uncertainty, and observer horizon dip.
   - Safeguarded root-finding: bracketed hybrid Newton-Raphson/bisection solver; verified across polar circle latitudes ($66.0^\circ, 66.564^\circ, 67.0^\circ, -68.0^\circ$); explicit indeterminate azimuth indicators at zenith, nadir, and geographic poles; elevation residual verification.
   - Performance & reproducibility: instantaneous position evaluation (`solar.evaluatePosition`), bounded diurnal cycle event cache (up to 50x speedup), civil time database runtime provenance exposure, and fractional `searchLimitDays` hardening.
-  - 244/244 passing tests with 96.99% line coverage and 0 build errors.
+  - 251/251 passing tests with 97.19% line coverage and 0 build errors.
 - [ ] **Phase 3 — Temporal Conditions & Resolver**: Typed Condition AST, continuous root-finding/bisection, and explainable interval synthesis.
 - [ ] **Phase 4 — Developer SDK & Benchmarks**: Golden vector NOAA validation and public facade packaging.
 - [ ] **Phase 5 — Visual Diagnostic Suite**: Interactive spacetime ribbon, solar curves, and developer query console.

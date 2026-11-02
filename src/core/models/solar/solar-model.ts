@@ -10,13 +10,16 @@ import { Place } from '../../primitives/place.js';
 import { ModelMetadata, TemporalModel } from '../model.js';
 import { findNextSolarEvent } from './events.js';
 import {
+  ASTRONOMICAL_TWILIGHT_ELEVATION_DEG,
+  CIVIL_TWILIGHT_ELEVATION_DEG,
   calcSolarNoon,
   computeSolarCoordinates,
   findSolarCrossing,
+  NAUTICAL_TWILIGHT_ELEVATION_DEG,
   NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
 } from './math.js';
 import { classifySolarPhase, evaluatePolarRegime, PolarRegime } from './polar.js';
-import { InstantaneousSolarPosition, SolarEventOptions, SolarState } from './types.js';
+import { InstantaneousSolarPosition, SolarEventOptions, SolarPhase, SolarState } from './types.js';
 
 export const SOLAR_MODEL_METADATA: ModelMetadata = Object.freeze({
   name: 'Astronomical Solar Model (Jean Meeus / NOAA)',
@@ -48,7 +51,8 @@ const diurnalCache = new Map<string, DiurnalCycleEvents>();
 
 function getDiurnalCycleEvents(place: Place, instant: Instant): DiurnalCycleEvents {
   const noon = calcSolarNoon(instant, place.longitude);
-  const cacheKey = `${place.latitude.toFixed(5)},${place.longitude.toFixed(5)}:${noon.epochNanoseconds}`;
+  const noonSeconds = Math.round(Number(noon.epochNanoseconds / 1_000_000_000n));
+  const cacheKey = `${place.latitude.toFixed(5)},${place.longitude.toFixed(5)}:${noonSeconds}`;
 
   const cached = diurnalCache.get(cacheKey);
   if (cached !== undefined) {
@@ -105,8 +109,24 @@ export class SolarModel implements TemporalModel<SolarState> {
    */
   evaluatePosition(instant: Instant, place: Place): InstantaneousSolarPosition {
     const coords = computeSolarCoordinates(instant, place);
-    const regime = evaluatePolarRegime(place, instant);
-    const phase = classifySolarPhase(coords.geometricElevationDeg, regime);
+    let phase: SolarPhase;
+
+    if (Math.abs(place.latitude) >= 65.0) {
+      const diurnal = getDiurnalCycleEvents(place, instant);
+      phase = classifySolarPhase(coords.geometricElevationDeg, diurnal);
+    } else {
+      if (coords.geometricElevationDeg >= NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG) {
+        phase = 'day';
+      } else if (coords.geometricElevationDeg >= CIVIL_TWILIGHT_ELEVATION_DEG) {
+        phase = 'civil_twilight';
+      } else if (coords.geometricElevationDeg >= NAUTICAL_TWILIGHT_ELEVATION_DEG) {
+        phase = 'nautical_twilight';
+      } else if (coords.geometricElevationDeg >= ASTRONOMICAL_TWILIGHT_ELEVATION_DEG) {
+        phase = 'astronomical_twilight';
+      } else {
+        phase = 'night';
+      }
+    }
 
     return Object.freeze({
       elevationDeg: coords.apparentElevationDeg,
