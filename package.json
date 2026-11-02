@@ -1,0 +1,38 @@
+{
+  "name": "@chronoflux/core",
+  "version": "0.1.0",
+  "description": "Universal temporal foundation and condition-state engine",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [
+    "temporal",
+    "time",
+    "instant",
+    "duration",
+    "allen-interval-algebra",
+    "interval-set",
+    "chronoflux"
+  ],
+  "author": "ChronoFlux Contributors",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^2.1.9",
+    "fast-check": "^3.23.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
