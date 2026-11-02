@@ -8,6 +8,7 @@ import { Instant } from './core/primitives/instant.js';
 import { Interval } from './core/primitives/interval.js';
 import { IntervalSet } from './core/primitives/interval-set.js';
 import { Place, PlaceOptions } from './core/primitives/place.js';
+import { RoundingMode } from './core/primitives/types.js';
 
 export * from './core/index.js';
 
@@ -26,12 +27,12 @@ export const ChronoFlux = {
   /**
    * Constructs an Instant from nanoseconds, milliseconds, Date, or ISO string.
    */
-  instant(source: bigint | number | Date | string): Instant {
+  instant(source: bigint | number | Date | string, roundingMode?: RoundingMode): Instant {
     if (typeof source === 'bigint') {
-      return Instant.fromEpochNanoseconds(source);
+      return Instant.fromEpochNanoseconds(source, roundingMode);
     }
     if (typeof source === 'number') {
-      return Instant.fromEpochMilliseconds(source);
+      return Instant.fromEpochMilliseconds(source, roundingMode);
     }
     if (source instanceof Date) {
       return Instant.fromDate(source);
@@ -46,29 +47,29 @@ export const ChronoFlux = {
    * Duration factory methods and unit helpers.
    */
   duration: {
-    nanoseconds(ns: bigint | number): Duration {
-      return Duration.fromNanoseconds(ns);
+    nanoseconds(ns: bigint | number | string, roundingMode?: RoundingMode): Duration {
+      return Duration.fromNanoseconds(ns, roundingMode);
     },
-    microseconds(us: bigint | number): Duration {
-      return Duration.fromMicroseconds(us);
+    microseconds(us: bigint | number | string, roundingMode?: RoundingMode): Duration {
+      return Duration.fromMicroseconds(us, roundingMode);
     },
-    milliseconds(ms: bigint | number): Duration {
-      return Duration.fromMilliseconds(ms);
+    milliseconds(ms: bigint | number | string, roundingMode?: RoundingMode): Duration {
+      return Duration.fromMilliseconds(ms, roundingMode);
     },
-    seconds(s: bigint | number): Duration {
-      return Duration.fromSeconds(s);
+    seconds(s: bigint | number | string, roundingMode?: RoundingMode): Duration {
+      return Duration.fromSeconds(s, roundingMode);
     },
-    minutes(m: bigint | number): Duration {
-      return Duration.fromMinutes(m);
+    minutes(m: bigint | number | string, roundingMode?: RoundingMode): Duration {
+      return Duration.fromMinutes(m, roundingMode);
     },
-    hours(h: bigint | number): Duration {
-      return Duration.fromHours(h);
+    hours(h: bigint | number | string, roundingMode?: RoundingMode): Duration {
+      return Duration.fromHours(h, roundingMode);
     },
-    days(d: bigint | number): Duration {
-      return Duration.fromDays(d);
+    days(d: bigint | number | string, roundingMode?: RoundingMode): Duration {
+      return Duration.fromDays(d, roundingMode);
     },
-    of(fields: DurationFields): Duration {
-      return Duration.of(fields);
+    of(fields: DurationFields, roundingMode?: RoundingMode): Duration {
+      return Duration.of(fields, roundingMode);
     },
     zero(): Duration {
       return Duration.zero();

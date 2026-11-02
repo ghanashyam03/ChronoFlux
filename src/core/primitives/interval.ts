@@ -37,6 +37,7 @@ export class Interval {
     this.start = start;
     this.end = end;
     this.duration = end.diff(start);
+    Object.freeze(this);
   }
 
   static of(start: Instant, end: Instant): Interval {
@@ -87,14 +88,25 @@ export class Interval {
   /**
    * Evaluates whether this interval shares a non-empty intersection with another interval:
    * max(start_A, start_B) < min(end_A, end_B).
+   *
+   * This is the general set-theoretic intersection predicate (A ∩ B ≠ ∅).
    */
-  overlaps(other: Interval): boolean {
+  intersects(other: Interval): boolean {
     if (!(other instanceof Interval)) {
-      throw new TypeError('Expected an Interval instance in Interval.overlaps');
+      throw new TypeError('Expected an Interval instance in Interval.intersects');
     }
     const maxStart = this.start.isAfter(other.start) ? this.start : other.start;
     const minEnd = this.end.isBefore(other.end) ? this.end : other.end;
     return maxStart.isBefore(minEnd);
+  }
+
+  /**
+   * Evaluates whether this interval intersects another interval.
+   * Alias for `intersects()`. For Allen's directional 'overlaps' relationship (sA < sB < eA < eB),
+   * use `relationTo(other) === 'overlaps'` or `overlapsRelation(other)`.
+   */
+  overlaps(other: Interval): boolean {
+    return this.intersects(other);
   }
 
   /**
@@ -198,6 +210,10 @@ export class Interval {
     return this.end.equals(other.start);
   }
 
+  isMeets(other: Interval): boolean {
+    return this.meets(other);
+  }
+
   isMetBy(other: Interval): boolean {
     if (!(other instanceof Interval)) throw new TypeError('Expected an Interval instance');
     return this.start.equals(other.end);
@@ -209,6 +225,10 @@ export class Interval {
 
   overlapsRelation(other: Interval): boolean {
     return this.relationTo(other) === 'overlaps';
+  }
+
+  isOverlaps(other: Interval): boolean {
+    return this.overlapsRelation(other);
   }
 
   isOverlappedBy(other: Interval): boolean {
@@ -223,6 +243,10 @@ export class Interval {
     return this.relationTo(other) === 'starts';
   }
 
+  isStarts(other: Interval): boolean {
+    return this.starts(other);
+  }
+
   isStartedBy(other: Interval): boolean {
     return this.relationTo(other) === 'startedBy';
   }
@@ -235,12 +259,24 @@ export class Interval {
     return this.relationTo(other) === 'during';
   }
 
+  isDuring(other: Interval): boolean {
+    return this.during(other);
+  }
+
   containsInterval(other: Interval): boolean {
     return this.relationTo(other) === 'contains';
   }
 
+  isContainsInterval(other: Interval): boolean {
+    return this.containsInterval(other);
+  }
+
   finishes(other: Interval): boolean {
     return this.relationTo(other) === 'finishes';
+  }
+
+  isFinishes(other: Interval): boolean {
+    return this.finishes(other);
   }
 
   isFinishedBy(other: Interval): boolean {

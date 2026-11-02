@@ -22,7 +22,8 @@ export class IntervalSet implements Iterable<Interval> {
   readonly intervals: readonly Interval[];
 
   private constructor(intervals: readonly Interval[]) {
-    this.intervals = intervals;
+    this.intervals = Object.freeze(intervals.slice());
+    Object.freeze(this);
   }
 
   // --- Static Factories ---

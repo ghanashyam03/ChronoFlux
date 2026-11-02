@@ -82,6 +82,8 @@ export class Place {
     if (timeZoneId !== undefined) {
       this.timeZoneId = timeZoneId.trim();
     }
+
+    Object.freeze(this);
   }
 
   static create(options: PlaceOptions): Place {

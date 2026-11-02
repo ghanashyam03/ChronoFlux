@@ -4,6 +4,7 @@
  */
 
 export * from './types.js';
+export * from './numeric.js';
 export * from './allen.js';
 export * from './duration.js';
 export * from './instant.js';

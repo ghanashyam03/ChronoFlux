@@ -4,8 +4,10 @@
  */
 
 import { Duration } from './duration.js';
+import { parseUnitToNanoseconds } from './numeric.js';
 import {
   InstantJSON,
+  InstantParseOptions,
   MAX_EPOCH_NANOSECONDS,
   MIN_EPOCH_NANOSECONDS,
   NANOSECONDS_PER_DAY,
@@ -16,6 +18,40 @@ import {
   NANOSECONDS_PER_SECOND,
   RoundingMode,
 } from './types.js';
+
+/**
+ * Historical IERS leap second dates (positive leap seconds inserted at 23:59:60 UTC).
+ * Between 1972 and 2026, exactly 27 leap seconds were declared.
+ */
+const HISTORICAL_LEAP_SECOND_DATES = new Set([
+  '1972-06-30',
+  '1972-12-31',
+  '1973-12-31',
+  '1974-12-31',
+  '1975-12-31',
+  '1976-12-31',
+  '1977-12-31',
+  '1978-12-31',
+  '1979-12-31',
+  '1981-06-30',
+  '1982-06-30',
+  '1983-06-30',
+  '1985-06-30',
+  '1987-12-31',
+  '1989-12-31',
+  '1990-12-31',
+  '1992-06-30',
+  '1993-06-30',
+  '1994-06-30',
+  '1995-12-31',
+  '1997-06-30',
+  '1998-12-31',
+  '2005-12-31',
+  '2008-12-31',
+  '2012-06-30',
+  '2015-06-30',
+  '2016-12-31',
+]);
 
 /**
  * Euclidean affine Gregorian calendar algorithms for arbitrary-precision days since 1970-01-01.
@@ -107,6 +143,7 @@ export class Instant {
         `epochNanoseconds ${epochNanoseconds} exceeds supported range [${MIN_EPOCH_NANOSECONDS}, ${MAX_EPOCH_NANOSECONDS}]`
       );
     }
+    Object.freeze(this);
   }
 
   // --- Static Sentinel Constants ---
@@ -117,32 +154,29 @@ export class Instant {
 
   // --- Factories ---
 
-  static fromEpochNanoseconds(epochNanoseconds: bigint): Instant {
-    return new Instant(epochNanoseconds);
+  static fromEpochNanoseconds(epochNanoseconds: bigint | number | string, roundingMode?: RoundingMode): Instant {
+    if (typeof epochNanoseconds === 'bigint') {
+      return new Instant(epochNanoseconds);
+    }
+    return new Instant(parseUnitToNanoseconds(epochNanoseconds, 1n, 'epochNanoseconds', roundingMode));
   }
 
-  static fromEpochMicroseconds(epochMicroseconds: bigint | number): Instant {
-    if (typeof epochMicroseconds === 'number' && !Number.isFinite(epochMicroseconds)) {
-      throw new TypeError(`epochMicroseconds must be a finite number or bigint, received: ${epochMicroseconds}`);
-    }
-    const us = typeof epochMicroseconds === 'bigint' ? epochMicroseconds : BigInt(Math.trunc(epochMicroseconds));
-    return new Instant(us * NANOSECONDS_PER_MICROSECOND);
+  static fromEpochMicroseconds(epochMicroseconds: bigint | number | string, roundingMode?: RoundingMode): Instant {
+    return new Instant(
+      parseUnitToNanoseconds(epochMicroseconds, NANOSECONDS_PER_MICROSECOND, 'epochMicroseconds', roundingMode)
+    );
   }
 
-  static fromEpochMilliseconds(epochMilliseconds: number | bigint): Instant {
-    if (typeof epochMilliseconds === 'number' && !Number.isFinite(epochMilliseconds)) {
-      throw new TypeError(`epochMilliseconds must be a finite number or bigint, received: ${epochMilliseconds}`);
-    }
-    const ms = typeof epochMilliseconds === 'bigint' ? epochMilliseconds : BigInt(Math.trunc(epochMilliseconds));
-    return new Instant(ms * NANOSECONDS_PER_MILLISECOND);
+  static fromEpochMilliseconds(epochMilliseconds: bigint | number | string, roundingMode?: RoundingMode): Instant {
+    return new Instant(
+      parseUnitToNanoseconds(epochMilliseconds, NANOSECONDS_PER_MILLISECOND, 'epochMilliseconds', roundingMode)
+    );
   }
 
-  static fromEpochSeconds(epochSeconds: number | bigint): Instant {
-    if (typeof epochSeconds === 'number' && !Number.isFinite(epochSeconds)) {
-      throw new TypeError(`epochSeconds must be a finite number or bigint, received: ${epochSeconds}`);
-    }
-    const s = typeof epochSeconds === 'bigint' ? epochSeconds : BigInt(Math.trunc(epochSeconds));
-    return new Instant(s * NANOSECONDS_PER_SECOND);
+  static fromEpochSeconds(epochSeconds: bigint | number | string, roundingMode?: RoundingMode): Instant {
+    return new Instant(
+      parseUnitToNanoseconds(epochSeconds, NANOSECONDS_PER_SECOND, 'epochSeconds', roundingMode)
+    );
   }
 
   static fromDate(date: Date): Instant {
@@ -411,8 +445,16 @@ export class Instant {
   /**
    * Parses an ISO-8601 extended timestamp into an Instant.
    * Supports UTC ('Z') as well as arbitrary offset representations ('+05:30', '-08:00').
+   *
+   * Leap-Second Policy:
+   * ChronoFlux operates on a leap-second-free Unix epoch timeline (86,400 SI seconds per day).
+   * - By default (`leapSecondPolicy: 'compatible'`), timestamps with second 60 are accepted ONLY if
+   *   they occur at UTC 23:59:60Z on an authentic historical IERS leap second date, and are clamped
+   *   to second 59 per RFC 3339 / POSIX conventions.
+   * - Under `leapSecondPolicy: 'reject'` or `'strict'`, any second 60 is strictly rejected.
+   * - Second 60 on invalid leap-second dates or with non-zero UTC offsets is unconditionally rejected.
    */
-  static fromISOString(isoString: string): Instant {
+  static fromISOString(isoString: string, options?: InstantParseOptions): Instant {
     const trimmed = isoString.trim();
     const regex = /^([+-]?\d{4,6})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:([zZ])|([+-])(\d{2}):?(\d{2})?)?$/;
     const match = regex.exec(trimmed);
@@ -448,11 +490,63 @@ export class Instant {
       throw new RangeError(`Out-of-range time field in ISO string: "${isoString}"`);
     }
 
-    // Second 60 represents a leap second; only legal at 23:59 per RFC 3339 / TC39 Temporal
+    // Timezone offset validation: instant requires UTC designator 'Z' or explicit offset [+-]HH:MM
+    if (match[8] === undefined && match[9] === undefined) {
+      throw new RangeError(`ISO-8601 instant string must include a UTC designator 'Z' or offset: "${isoString}"`);
+    }
+
+    let offsetNs = 0n;
+    let isUtc = false;
+    if (match[8] !== undefined) {
+      isUtc = true;
+    } else {
+      const sign = match[9] === '-' ? -1n : 1n;
+      const offH = match[10] ? BigInt(match[10]) : 0n;
+      const offM = match[11] ? BigInt(match[11]) : 0n;
+
+      if (offH > 23n || offM > 59n) {
+        throw new RangeError(`Timezone offset out of range in ISO string: "${isoString}"`);
+      }
+      offsetNs = sign * (offH * NANOSECONDS_PER_HOUR + offM * NANOSECONDS_PER_MINUTE);
+      if (offH === 0n && offM === 0n) {
+        isUtc = true;
+      }
+    }
+
+    // Leap-second validation & handling
+    let effectiveSeconds = seconds;
     if (seconds === 60n) {
+      // Leap second requires UTC moment at 23:59:60.
+      // Second 60 with a non-zero UTC offset (e.g. +05:30) is strictly invalid.
+      if (!isUtc) {
+        throw new RangeError(
+          `Second 60 (leap second) is only valid with UTC designator 'Z' or zero offset (+00:00), non-zero offset is forbidden: "${isoString}"`
+        );
+      }
+
       if (hours !== 23n || minutes !== 59n) {
         throw new RangeError(`Second 60 (leap second) is only valid at 23:59 in ISO string: "${isoString}"`);
       }
+
+      const policy = options?.leapSecondPolicy ?? 'compatible';
+      if (policy === 'reject' || policy === 'strict') {
+        throw new RangeError(`Second 60 (leap second) rejected under strict leap second policy: "${isoString}"`);
+      }
+
+      // Check whether this date is an authentic historical IERS leap second date
+      const yearNorm = year >= 0n && year <= 9999n ? year.toString().padStart(4, '0') : year.toString();
+      const monthStr = month.toString().padStart(2, '0');
+      const dayStr = day.toString().padStart(2, '0');
+      const dateKey = `${yearNorm}-${monthStr}-${dayStr}`;
+
+      if (!HISTORICAL_LEAP_SECOND_DATES.has(dateKey)) {
+        throw new RangeError(
+          `Invalid leap second: "${dateKey}" is not a recognized historical IERS leap second date: "${isoString}"`
+        );
+      }
+
+      // In compatible mode, clamp second 60 to second 59 per Unix epoch / RFC 3339 convention
+      effectiveSeconds = 59n;
     } else if (seconds > 59n) {
       throw new RangeError(`Out-of-range seconds (${seconds}) in ISO string: "${isoString}"`);
     }
@@ -463,9 +557,6 @@ export class Instant {
       subSecNs = BigInt(padded);
     }
 
-    // Unix epoch ignores leap seconds per POSIX and TC39 Temporal: clamp second 60 to second 59
-    const effectiveSeconds = seconds === 60n ? 59n : seconds;
-
     const days = civilToDays(year, month, day);
     const localNs =
       days * NANOSECONDS_PER_DAY +
@@ -473,22 +564,6 @@ export class Instant {
       minutes * NANOSECONDS_PER_MINUTE +
       effectiveSeconds * NANOSECONDS_PER_SECOND +
       subSecNs;
-
-    // Timezone offset validation: instant requires UTC designator 'Z' or explicit offset [+-]HH:MM
-    let offsetNs = 0n;
-    if (match[8] === undefined) {
-      if (match[9] === undefined) {
-        throw new RangeError(`ISO-8601 instant string must include a UTC designator 'Z' or offset: "${isoString}"`);
-      }
-      const sign = match[9] === '-' ? -1n : 1n;
-      const offH = match[10] ? BigInt(match[10]) : 0n;
-      const offM = match[11] ? BigInt(match[11]) : 0n;
-
-      if (offH > 23n || offM > 59n) {
-        throw new RangeError(`Timezone offset out of range in ISO string: "${isoString}"`);
-      }
-      offsetNs = sign * (offH * NANOSECONDS_PER_HOUR + offM * NANOSECONDS_PER_MINUTE);
-    }
 
     const utcNs = localNs - offsetNs;
     return new Instant(utcNs);

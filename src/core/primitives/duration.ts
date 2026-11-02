@@ -4,6 +4,11 @@
  */
 
 import {
+  parseUnitToNanoseconds,
+  roundScaledDecimal,
+  validateRoundingMode,
+} from './numeric.js';
+import {
   DurationJSON,
   NANOSECONDS_PER_DAY,
   NANOSECONDS_PER_HOUR,
@@ -11,6 +16,7 @@ import {
   NANOSECONDS_PER_MILLISECOND,
   NANOSECONDS_PER_MINUTE,
   NANOSECONDS_PER_SECOND,
+  RoundingMode,
 } from './types.js';
 
 export interface DurationParts {
@@ -25,24 +31,13 @@ export interface DurationParts {
 }
 
 export interface DurationFields {
-  readonly days?: number | bigint;
-  readonly hours?: number | bigint;
-  readonly minutes?: number | bigint;
-  readonly seconds?: number | bigint;
-  readonly milliseconds?: number | bigint;
-  readonly microseconds?: number | bigint;
-  readonly nanoseconds?: number | bigint;
-}
-
-function toBigIntValue(val: bigint | number, name: string): bigint {
-  if (typeof val === 'bigint') return val;
-  if (typeof val === 'number') {
-    if (!Number.isFinite(val)) {
-      throw new TypeError(`${name} must be a finite number or bigint, received: ${val}`);
-    }
-    return BigInt(Math.trunc(val));
-  }
-  throw new TypeError(`${name} must be a number or bigint, received: ${typeof val}`);
+  readonly days?: number | bigint | string;
+  readonly hours?: number | bigint | string;
+  readonly minutes?: number | bigint | string;
+  readonly seconds?: number | bigint | string;
+  readonly milliseconds?: number | bigint | string;
+  readonly microseconds?: number | bigint | string;
+  readonly nanoseconds?: number | bigint | string;
 }
 
 /**
@@ -50,9 +45,10 @@ function toBigIntValue(val: bigint | number, name: string): bigint {
  *
  * Semantic Guarantees:
  * - Canonical storage is an exact signed `bigint` count of nanoseconds.
+ * - Runtime immutability: instances are deeply frozen via Object.freeze.
+ * - Exact numerical inputs: requires safe integers for number inputs; accepts BigInt and decimal strings for arbitrary precision.
+ * - Fractional-unit conversions require an explicit rounding policy.
  * - Free from calendar ambiguities (months, years) and timezone daylight-saving shifts.
- *   Calendar units such as months or years have variable durations depending on the Gregorian
- *   calendar date and local civil rules, and are intentionally excluded from this physical duration primitive.
  * - All core arithmetic is exact and does not use floating-point math.
  */
 export class Duration {
@@ -63,6 +59,7 @@ export class Duration {
       throw new TypeError(`Duration nanoseconds must be a bigint, received: ${typeof nanoseconds}`);
     }
     this.nanoseconds = nanoseconds;
+    Object.freeze(this);
   }
 
   // --- Factories ---
@@ -71,59 +68,59 @@ export class Duration {
     return new Duration(0n);
   }
 
-  static fromNanoseconds(ns: bigint | number): Duration {
-    return new Duration(toBigIntValue(ns, 'nanoseconds'));
+  static fromNanoseconds(ns: bigint | number | string, roundingMode?: RoundingMode): Duration {
+    return new Duration(parseUnitToNanoseconds(ns, 1n, 'nanoseconds', roundingMode));
   }
 
-  static fromMicroseconds(us: bigint | number): Duration {
-    return new Duration(toBigIntValue(us, 'microseconds') * NANOSECONDS_PER_MICROSECOND);
+  static fromMicroseconds(us: bigint | number | string, roundingMode?: RoundingMode): Duration {
+    return new Duration(parseUnitToNanoseconds(us, NANOSECONDS_PER_MICROSECOND, 'microseconds', roundingMode));
   }
 
-  static fromMilliseconds(ms: bigint | number): Duration {
-    return new Duration(toBigIntValue(ms, 'milliseconds') * NANOSECONDS_PER_MILLISECOND);
+  static fromMilliseconds(ms: bigint | number | string, roundingMode?: RoundingMode): Duration {
+    return new Duration(parseUnitToNanoseconds(ms, NANOSECONDS_PER_MILLISECOND, 'milliseconds', roundingMode));
   }
 
-  static fromSeconds(s: bigint | number): Duration {
-    return new Duration(toBigIntValue(s, 'seconds') * NANOSECONDS_PER_SECOND);
+  static fromSeconds(s: bigint | number | string, roundingMode?: RoundingMode): Duration {
+    return new Duration(parseUnitToNanoseconds(s, NANOSECONDS_PER_SECOND, 'seconds', roundingMode));
   }
 
-  static fromMinutes(m: bigint | number): Duration {
-    return new Duration(toBigIntValue(m, 'minutes') * NANOSECONDS_PER_MINUTE);
+  static fromMinutes(m: bigint | number | string, roundingMode?: RoundingMode): Duration {
+    return new Duration(parseUnitToNanoseconds(m, NANOSECONDS_PER_MINUTE, 'minutes', roundingMode));
   }
 
-  static fromHours(h: bigint | number): Duration {
-    return new Duration(toBigIntValue(h, 'hours') * NANOSECONDS_PER_HOUR);
+  static fromHours(h: bigint | number | string, roundingMode?: RoundingMode): Duration {
+    return new Duration(parseUnitToNanoseconds(h, NANOSECONDS_PER_HOUR, 'hours', roundingMode));
   }
 
-  static fromDays(d: bigint | number): Duration {
-    return new Duration(toBigIntValue(d, 'days') * NANOSECONDS_PER_DAY);
+  static fromDays(d: bigint | number | string, roundingMode?: RoundingMode): Duration {
+    return new Duration(parseUnitToNanoseconds(d, NANOSECONDS_PER_DAY, 'days', roundingMode));
   }
 
-  static of(fields: DurationFields): Duration {
+  static of(fields: DurationFields, roundingMode?: RoundingMode): Duration {
     if (typeof fields !== 'object' || fields === null) {
       throw new TypeError('Duration.of requires a valid non-null fields object');
     }
     let total = 0n;
     if (fields.days !== undefined) {
-      total += toBigIntValue(fields.days, 'days') * NANOSECONDS_PER_DAY;
+      total += parseUnitToNanoseconds(fields.days, NANOSECONDS_PER_DAY, 'days', roundingMode);
     }
     if (fields.hours !== undefined) {
-      total += toBigIntValue(fields.hours, 'hours') * NANOSECONDS_PER_HOUR;
+      total += parseUnitToNanoseconds(fields.hours, NANOSECONDS_PER_HOUR, 'hours', roundingMode);
     }
     if (fields.minutes !== undefined) {
-      total += toBigIntValue(fields.minutes, 'minutes') * NANOSECONDS_PER_MINUTE;
+      total += parseUnitToNanoseconds(fields.minutes, NANOSECONDS_PER_MINUTE, 'minutes', roundingMode);
     }
     if (fields.seconds !== undefined) {
-      total += toBigIntValue(fields.seconds, 'seconds') * NANOSECONDS_PER_SECOND;
+      total += parseUnitToNanoseconds(fields.seconds, NANOSECONDS_PER_SECOND, 'seconds', roundingMode);
     }
     if (fields.milliseconds !== undefined) {
-      total += toBigIntValue(fields.milliseconds, 'milliseconds') * NANOSECONDS_PER_MILLISECOND;
+      total += parseUnitToNanoseconds(fields.milliseconds, NANOSECONDS_PER_MILLISECOND, 'milliseconds', roundingMode);
     }
     if (fields.microseconds !== undefined) {
-      total += toBigIntValue(fields.microseconds, 'microseconds') * NANOSECONDS_PER_MICROSECOND;
+      total += parseUnitToNanoseconds(fields.microseconds, NANOSECONDS_PER_MICROSECOND, 'microseconds', roundingMode);
     }
     if (fields.nanoseconds !== undefined) {
-      total += toBigIntValue(fields.nanoseconds, 'nanoseconds');
+      total += parseUnitToNanoseconds(fields.nanoseconds, 1n, 'nanoseconds', roundingMode);
     }
     return new Duration(total);
   }
@@ -152,16 +149,111 @@ export class Duration {
     return this.nanoseconds < 0n ? new Duration(-this.nanoseconds) : this;
   }
 
-  multiply(factor: bigint | number): Duration {
-    const factorBig = toBigIntValue(factor, 'factor');
-    return new Duration(this.nanoseconds * factorBig);
+  multiply(factor: bigint | number | string, roundingMode?: RoundingMode): Duration {
+    if (factor === null || factor === undefined) {
+      throw new TypeError(`factor must be a number, bigint, or decimal string, received: ${factor}`);
+    }
+
+    if (typeof factor === 'bigint') {
+      return new Duration(this.nanoseconds * factor);
+    }
+
+    if (typeof factor === 'number') {
+      if (!Number.isFinite(factor)) {
+        throw new TypeError(`factor must be a finite number or bigint, received: ${factor}`);
+      }
+      if (Number.isSafeInteger(factor)) {
+        return new Duration(this.nanoseconds * BigInt(factor));
+      }
+      if (Number.isInteger(factor)) {
+        throw new RangeError(
+          `Integer factor ${factor} is outside safe integer range. Use BigInt or a decimal string.`
+        );
+      }
+      if (roundingMode === undefined) {
+        throw new RangeError(`Fractional multiplication factor (${factor}) requires an explicit rounding policy`);
+      }
+      return this.multiplyDecimalString(factor.toString(), roundingMode);
+    }
+
+    if (typeof factor === 'string') {
+      const trimmed = factor.trim();
+      if (/^[+-]?\d+$/.test(trimmed)) {
+        return new Duration(this.nanoseconds * BigInt(trimmed));
+      }
+      const match = /^([+-])?(\d+)\.(\d+)$/.exec(trimmed);
+      if (match) {
+        if (/^0+$/.test(match[3]!)) {
+          const sign = match[1] === '-' ? -1n : 1n;
+          return new Duration(this.nanoseconds * (sign * BigInt(match[2]!)));
+        }
+        if (roundingMode === undefined) {
+          throw new RangeError(`Fractional multiplication factor ("${factor}") requires an explicit rounding policy`);
+        }
+        return this.multiplyDecimalString(trimmed, roundingMode);
+      }
+      throw new TypeError(`Invalid numeric factor string: "${factor}"`);
+    }
+
+    throw new TypeError(`factor must be a number, bigint, or decimal string, received: ${typeof factor}`);
   }
 
-  divide(divisor: bigint | number): { quotient: bigint; remainder: Duration } {
-    const divBig = toBigIntValue(divisor, 'divisor');
+  private multiplyDecimalString(str: string, roundingMode: RoundingMode): Duration {
+    validateRoundingMode(roundingMode);
+    const match = /^([+-])?(\d+)(?:\.(\d+))?$/.exec(str);
+    if (!match) throw new TypeError(`Invalid decimal string: "${str}"`);
+
+    const factorSign = match[1] === '-' ? -1n : 1n;
+    const whole = BigInt(match[2]!);
+    const fracStr = match[3] ?? '';
+    const scale = BigInt(fracStr.length);
+    const frac = fracStr.length > 0 ? BigInt(fracStr) : 0n;
+    const denom = 10n ** scale;
+
+    const durSign = this.nanoseconds < 0n ? -1n : 1n;
+    const absNs = this.nanoseconds < 0n ? -this.nanoseconds : this.nanoseconds;
+    const netSign: 1n | -1n = (factorSign * durSign) < 0n ? -1n : 1n;
+
+    const scaledWhole = whole * absNs;
+    const fracNum = frac * absNs;
+    const totalNs = roundScaledDecimal(netSign, scaledWhole, fracNum, denom, roundingMode);
+
+    return new Duration(totalNs);
+  }
+
+  divide(divisor: bigint | number | string): { quotient: bigint; remainder: Duration } {
+    if (divisor === null || divisor === undefined) {
+      throw new TypeError(`divisor must be a number, bigint, or decimal string, received: ${divisor}`);
+    }
+
+    let divBig: bigint;
+    if (typeof divisor === 'bigint') {
+      divBig = divisor;
+    } else if (typeof divisor === 'number') {
+      if (!Number.isFinite(divisor)) {
+        throw new TypeError(`divisor must be a finite number or bigint, received: ${divisor}`);
+      }
+      if (!Number.isSafeInteger(divisor)) {
+        if (!Number.isInteger(divisor)) {
+          throw new RangeError(`Duration.divide requires an integer divisor, received fractional number: ${divisor}`);
+        }
+        throw new RangeError(`Integer divisor ${divisor} is outside safe integer range. Use BigInt or integer string.`);
+      }
+      divBig = BigInt(divisor);
+    } else if (typeof divisor === 'string') {
+      const trimmed = divisor.trim();
+      if (!/^[+-]?\d+$/.test(trimmed)) {
+        throw new TypeError(`Invalid divisor string: "${divisor}"`);
+      }
+      divBig = BigInt(trimmed);
+    } else {
+      throw new TypeError(`divisor must be a number, bigint, or integer string, received: ${typeof divisor}`);
+    }
+
     if (divBig === 0n) {
       throw new RangeError('Division by zero in Duration.divide');
     }
+
     const q = this.nanoseconds / divBig;
     const r = this.nanoseconds % divBig;
     return {

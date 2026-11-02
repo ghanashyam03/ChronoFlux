@@ -34,6 +34,21 @@ export const MAX_EPOCH_NANOSECONDS = 8_640_000_000_000_000_000_000n;
 export type RoundingMode = 'trunc' | 'floor' | 'ceil' | 'halfExpand';
 
 /**
+ * Options for parsing ISO-8601 timestamps in Instant.fromISOString.
+ */
+export interface InstantParseOptions {
+  /**
+   * Policy for handling leap seconds (second 60) in ISO-8601 strings.
+   *
+   * - `compatible` (default): Accepts second 60 ONLY on historical IERS leap second dates
+   *   at UTC 23:59:60Z and clamps to 59 per RFC 3339 / POSIX conventions.
+   * - `reject` / `strict`: Strictly rejects all leap second timestamps with a RangeError.
+   * - `clamp`: Equivalent to `compatible`.
+   */
+  readonly leapSecondPolicy?: 'compatible' | 'reject' | 'strict' | 'clamp';
+}
+
+/**
  * Allen's 13 Elementary Interval Relationships (Allen, 1983).
  *
  * For any two non-empty, half-open intervals A = [s_A, e_A) and B = [s_B, e_B),
