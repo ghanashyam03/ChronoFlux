@@ -6,6 +6,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    fileParallelism: false,
     env: isCoverage ? { VITEST_COVERAGE: '1' } : {},
     include: ['tests/**/*.test.ts'],
     coverage: {

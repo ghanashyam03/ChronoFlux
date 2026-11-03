@@ -6,9 +6,9 @@
  * exactly one of the 13 relationships holds.
  */
 
-import { AllenRelation } from './types.js';
+import type { AllenRelation } from './types.js';
 
-export { AllenRelation };
+export type { AllenRelation };
 
 /**
  * Returns the formal converse relationship for a given Allen relation.

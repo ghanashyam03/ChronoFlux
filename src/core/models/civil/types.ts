@@ -20,6 +20,11 @@ import { Duration } from '../../primitives/duration.js';
 export type DisambiguationPolicy = 'compatible' | 'earlier' | 'later' | 'reject';
 
 /**
+ * Type alias for DisambiguationPolicy for DST disambiguation.
+ */
+export type DstDisambiguation = DisambiguationPolicy;
+
+/**
  * Input fields for resolving a local civil date/time into a physical Instant.
  */
 export interface CivilDateTimeInput {

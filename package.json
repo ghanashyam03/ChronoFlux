@@ -11,8 +11,25 @@
       "import": "./dist/index.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ghanashyam03/ChronoFlux.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ghanashyam03/ChronoFlux/issues"
+  },
+  "homepage": "https://github.com/ghanashyam03/ChronoFlux#readme",
   "scripts": {
     "build": "tsc",
+    "prepack": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

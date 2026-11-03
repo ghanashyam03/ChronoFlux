@@ -99,6 +99,29 @@ export type ConditionAST = AtomicConditionNode | LogicalConditionNode;
 const CATEGORICAL_PROPS: ReadonlySet<string> = new Set(['phase', 'polarRegime']);
 const BOOLEAN_PROPS: ReadonlySet<string> = new Set(['isDirectSunlight', 'isDaylightSaving']);
 const ANGLE_PROPS: ReadonlySet<string> = new Set(['elevation', 'azimuth', 'zenith']);
+const DISCRETE_CIVIL_PROPS: ReadonlySet<string> = new Set([
+  'hour',
+  'minute',
+  'second',
+  'dayOfWeek',
+  'day',
+  'month',
+  'year',
+]);
+
+export const VALID_SOLAR_PHASES: readonly string[] = Object.freeze([
+  'day',
+  'civil_twilight',
+  'nautical_twilight',
+  'astronomical_twilight',
+  'night',
+]);
+
+export const VALID_POLAR_REGIMES: readonly string[] = Object.freeze([
+  'none',
+  'polar_day',
+  'polar_night',
+]);
 
 const CIVIL_NUMERIC_BOUNDS: Record<string, { min: number; max: number }> = Object.freeze({
   hour: Object.freeze({ min: 0, max: 24 }),
@@ -309,6 +332,7 @@ export function validateConditionAST(node: unknown): asserts node is ConditionAS
     }
 
     if (CATEGORICAL_PROPS.has(prop)) {
+      const validSet = prop === 'phase' ? VALID_SOLAR_PHASES : VALID_POLAR_REGIMES;
       if (operator === 'in') {
         if (!Array.isArray(value) || value.length === 0) {
           throw new TypeError(`Property '${prop}' with operator 'in' requires a non-empty array of strings.`);
@@ -317,10 +341,20 @@ export function validateConditionAST(node: unknown): asserts node is ConditionAS
           if (typeof item !== 'string' || item.trim().length === 0) {
             throw new TypeError(`Property '${prop}' with operator 'in' requires non-empty string values.`);
           }
+          if (!validSet.includes(item)) {
+            throw new TypeError(
+              `Invalid value '${item}' for categorical property '${prop}'. Expected one of: ${validSet.join(', ')}`
+            );
+          }
         }
       } else {
         if (typeof value !== 'string' || value.trim().length === 0) {
           throw new TypeError(`Property '${prop}' requires a non-empty string value, received: ${typeof value}.`);
+        }
+        if (!validSet.includes(value)) {
+          throw new TypeError(
+            `Invalid value '${value}' for categorical property '${prop}'. Expected one of: ${validSet.join(', ')}`
+          );
         }
       }
       return;
@@ -330,6 +364,12 @@ export function validateConditionAST(node: unknown): asserts node is ConditionAS
     const checkFiniteNumber = (val: unknown, name: string): void => {
       if (typeof val !== 'number' || !Number.isFinite(val)) {
         throw new TypeError(`Property '${name}' requires finite numeric values, received: ${val}`);
+      }
+    };
+
+    const checkIntegerNumber = (val: number, name: string): void => {
+      if (DISCRETE_CIVIL_PROPS.has(name) && !Number.isInteger(val)) {
+        throw new TypeError(`Civil property '${name}' requires integer values, received: ${val}`);
       }
     };
 
@@ -352,6 +392,8 @@ export function validateConditionAST(node: unknown): asserts node is ConditionAS
       }
       checkFiniteNumber(value[0], prop);
       checkFiniteNumber(value[1], prop);
+      checkIntegerNumber(value[0] as number, prop);
+      checkIntegerNumber(value[1] as number, prop);
       checkBounds(value[0] as number, prop);
       checkBounds(value[1] as number, prop);
       if (prop !== 'azimuth' && (value[0] as number) > (value[1] as number)) {
@@ -365,10 +407,12 @@ export function validateConditionAST(node: unknown): asserts node is ConditionAS
       }
       for (const item of value) {
         checkFiniteNumber(item, prop);
+        checkIntegerNumber(item as number, prop);
         checkBounds(item as number, prop);
       }
     } else {
       checkFiniteNumber(value, prop);
+      checkIntegerNumber(value as number, prop);
       checkBounds(value as number, prop);
     }
 

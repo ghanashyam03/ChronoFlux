@@ -39,6 +39,55 @@ import {
 
 export * from './core/index.js';
 
+// Explicit type re-exports ensuring clean accessibility at the package root level
+export type {
+  // Core Primitives
+  RoundingMode,
+  AngleUnit,
+  TimeUnit,
+  AllenRelation,
+  DurationFields,
+  PlaceOptions,
+
+  // Astronomical Solar Model
+  SolarState,
+  SolarPhase,
+  PolarRegimeType,
+  CrossingCondition,
+  SolarUncertaintyDetails,
+  SolarEventOptions,
+  InstantaneousSolarPosition,
+  AstronomicalTimeScale,
+  AstronomicalTimeScaleOptions,
+
+  // Civil Calendar & IANA Time Zone Model
+  CivilState,
+  CivilDateTimeInput,
+  TimeZoneLookupProvider,
+  CivilTimeProvenance,
+  DisambiguationPolicy,
+  DstDisambiguation,
+  DstConfidence,
+
+  // Temporal Conditions & Resolver
+  ConditionAST,
+  AtomicConditionNode,
+  LogicalConditionNode,
+  SolarComparisonNode,
+  CivilComparisonNode,
+  ComparisonOperator,
+  LogicalOperator,
+  SolarProperty,
+  CivilProperty,
+  ModelDomain,
+  ResolveOptions,
+  ResolutionResult,
+  ResolutionReport,
+  IntervalExplanation,
+  BoundaryExplanation,
+  SelectionPolicy,
+} from './core/index.js';
+
 /**
  * ChronoFlux public developer facade.
  * Provides concise and ergonomic factory methods for temporal foundations,
@@ -267,3 +316,5 @@ export const ChronoFlux = Object.freeze({
     return resolve(options);
   },
 });
+
+export default ChronoFlux;
