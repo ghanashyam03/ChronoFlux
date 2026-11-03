@@ -80,6 +80,119 @@ function matchesNumericOp(actual: number, operator: string, target: number | rea
   }
 }
 
+function matchesHourOp(h: number, operator: string, target: number | readonly number[]): boolean {
+  switch (operator) {
+    case 'eq':
+      return h === target;
+    case 'neq':
+      return h !== target;
+    case 'gt':
+      return h > (target as number);
+    case 'gte':
+      return h >= (target as number);
+    case 'lt':
+      return h < (target as number);
+    case 'lte':
+      return h <= (target as number);
+    case 'between': {
+      const [minV, maxV] = target as readonly [number, number];
+      return h >= minV && h < maxV;
+    }
+    case 'in':
+      return (target as readonly number[]).includes(h);
+    default:
+      return false;
+  }
+}
+
+interface HourBlock {
+  readonly hour: number;
+  readonly disambiguation: 'earlier' | 'later' | 'compatible';
+  readonly start: Instant;
+  readonly end: Instant;
+}
+
+function getHourBlocksForDay(
+  year: number,
+  month: number,
+  day: number,
+  timeZoneId: string,
+  dayEnd: Instant,
+  isFallBackDay: boolean
+): readonly HourBlock[] {
+  const blocks: HourBlock[] = [];
+
+  for (let h = 0; h < 24; h++) {
+    const tEarlier = civilModel.resolve({
+      year,
+      month,
+      day,
+      hour: h,
+      minute: 0,
+      second: 0,
+      timeZoneId,
+      disambiguation: isFallBackDay ? 'earlier' : 'compatible',
+    });
+    const tLater = isFallBackDay
+      ? civilModel.resolve({
+          year,
+          month,
+          day,
+          hour: h,
+          minute: 0,
+          second: 0,
+          timeZoneId,
+          disambiguation: 'later',
+        })
+      : tEarlier;
+
+    const nextH = h + 1;
+    const nextHourStart =
+      nextH >= 24
+        ? dayEnd
+        : civilModel.resolve({
+            year,
+            month,
+            day,
+            hour: nextH,
+            minute: 0,
+            second: 0,
+            timeZoneId,
+            disambiguation: isFallBackDay ? 'earlier' : 'compatible',
+          });
+
+    if (tEarlier.equals(tLater)) {
+      if (tEarlier.isBefore(nextHourStart)) {
+        blocks.push({
+          hour: h,
+          disambiguation: 'compatible',
+          start: tEarlier,
+          end: nextHourStart,
+        });
+      }
+    } else {
+      if (tEarlier.isBefore(tLater)) {
+        blocks.push({
+          hour: h,
+          disambiguation: 'earlier',
+          start: tEarlier,
+          end: tLater,
+        });
+      }
+      if (tLater.isBefore(nextHourStart)) {
+        blocks.push({
+          hour: h,
+          disambiguation: 'later',
+          start: tLater,
+          end: nextHourStart,
+        });
+      }
+    }
+  }
+
+  return blocks;
+}
+
 /**
  * Resolves the effective IANA time zone identifier for a Place.
  * Requires an explicit place.timeZoneId or a registered TimeZoneLookupProvider;
@@ -203,40 +316,26 @@ export function solveCivilCondition(
 
       // 2. Hour property
       else if (property === 'hour') {
-        const disambiguations: ('earlier' | 'later' | 'compatible')[] = isFallBackDay ? ['earlier', 'later'] : ['compatible'];
-        for (const disambig of disambiguations) {
+        const hourBlocks = getHourBlocksForDay(cur.year, cur.month, cur.day, timeZoneId, dayEnd, isFallBackDay);
+        for (const block of hourBlocks) {
+          if (matchesHourOp(block.hour, operator, value as number | readonly number[])) {
+            intervals.push(new Interval(block.start, block.end));
+          }
+        }
+
+        if (boundaryRecordMap) {
           if (operator === 'between') {
             const [hStart, hEnd] = value as readonly [number, number];
-            const tStart = civilModel.resolve({
-              year: cur.year,
-              month: cur.month,
-              day: cur.day,
-              hour: hStart,
-              minute: 0,
-              second: 0,
-              timeZoneId,
-              disambiguation: disambig,
-            });
-            const tEnd =
-              hEnd >= 24
-                ? dayEnd
-                : civilModel.resolve({
-                    year: cur.year,
-                    month: cur.month,
-                    day: cur.day,
-                    hour: hEnd,
-                    minute: 0,
-                    second: 0,
-                    timeZoneId,
-                    disambiguation: disambig,
-                  });
-
-            if (tStart.isBefore(tEnd)) {
-              intervals.push(new Interval(tStart, tEnd));
-              const isBizHours = hStart === 9 && hEnd === 17;
+            const isBizHours = hStart === 9 && hEnd === 17;
+            const matchingBlocks = hourBlocks.filter((b) =>
+              matchesHourOp(b.hour, operator, value as number | readonly number[])
+            );
+            if (matchingBlocks.length > 0) {
+              const firstBlock = matchingBlocks[0]!;
+              const lastBlock = matchingBlocks[matchingBlocks.length - 1]!;
               recordProvenance(
                 boundaryRecordMap,
-                tStart,
+                firstBlock.start,
                 'start',
                 'hour',
                 hStart,
@@ -248,7 +347,7 @@ export function solveCivilCondition(
               );
               recordProvenance(
                 boundaryRecordMap,
-                tEnd,
+                lastBlock.end,
                 'end',
                 'hour',
                 hEnd,
@@ -261,214 +360,109 @@ export function solveCivilCondition(
             }
           } else if (operator === 'gte' || operator === 'gt') {
             const h = operator === 'gte' ? (value as number) : (value as number) + 1;
-            if (h <= 23) {
-              const tStart = civilModel.resolve({
-                year: cur.year,
-                month: cur.month,
-                day: cur.day,
-                hour: h,
-                minute: 0,
-                second: 0,
+            const matchingBlocks = hourBlocks.filter((b) =>
+              matchesHourOp(b.hour, operator, value as number | readonly number[])
+            );
+            if (matchingBlocks.length > 0) {
+              const firstBlock = matchingBlocks[0]!;
+              recordProvenance(
+                boundaryRecordMap,
+                firstBlock.start,
+                'start',
+                'hour',
+                h,
                 timeZoneId,
-                disambiguation: disambig,
-              });
-              if (tStart.isBefore(dayEnd)) {
-                intervals.push(new Interval(tStart, dayEnd));
-                recordProvenance(
-                  boundaryRecordMap,
-                  tStart,
-                  'start',
-                  'hour',
-                  h,
-                  timeZoneId,
-                  `Civil time entered hour >= ${h}:00 in ${timeZoneId}.`,
-                  `civil.hour >= ${h}`
-                );
-                recordProvenance(
-                  boundaryRecordMap,
-                  dayEnd,
-                  'end',
-                  'hour',
-                  24,
-                  timeZoneId,
-                  `Civil time exited matching hour in ${timeZoneId}.`,
-                  `civil.hour >= ${h}`
-                );
-              }
+                `Civil time entered hour >= ${h}:00 in ${timeZoneId}.`,
+                `civil.hour >= ${h}`
+              );
+              recordProvenance(
+                boundaryRecordMap,
+                dayEnd,
+                'end',
+                'hour',
+                24,
+                timeZoneId,
+                `Civil time exited matching hour in ${timeZoneId}.`,
+                `civil.hour >= ${h}`
+              );
             }
           } else if (operator === 'lte' || operator === 'lt') {
             const h = operator === 'lte' ? (value as number) + 1 : (value as number);
-            if (h >= 1) {
-              const tEnd =
-                h >= 24
-                  ? dayEnd
-                  : civilModel.resolve({
-                      year: cur.year,
-                      month: cur.month,
-                      day: cur.day,
-                      hour: h,
-                      minute: 0,
-                      second: 0,
-                      timeZoneId,
-                      disambiguation: disambig,
-                    });
-              if (dayStart.isBefore(tEnd)) {
-                intervals.push(new Interval(dayStart, tEnd));
-                recordProvenance(
-                  boundaryRecordMap,
-                  dayStart,
-                  'start',
-                  'hour',
-                  0,
-                  timeZoneId,
-                  `Civil time entered matching hour in ${timeZoneId}.`,
-                  `civil.hour < ${h}`
-                );
-                recordProvenance(
-                  boundaryRecordMap,
-                  tEnd,
-                  'end',
-                  'hour',
-                  h,
-                  timeZoneId,
-                  `Civil time exited hour < ${h}:00 in ${timeZoneId}.`,
-                  `civil.hour < ${h}`
-                );
-              }
+            const matchingBlocks = hourBlocks.filter((b) =>
+              matchesHourOp(b.hour, operator, value as number | readonly number[])
+            );
+            if (matchingBlocks.length > 0) {
+              const lastBlock = matchingBlocks[matchingBlocks.length - 1]!;
+              recordProvenance(
+                boundaryRecordMap,
+                dayStart,
+                'start',
+                'hour',
+                0,
+                timeZoneId,
+                `Civil time entered matching hour in ${timeZoneId}.`,
+                `civil.hour < ${h}`
+              );
+              recordProvenance(
+                boundaryRecordMap,
+                lastBlock.end,
+                'end',
+                'hour',
+                h,
+                timeZoneId,
+                `Civil time exited hour < ${h}:00 in ${timeZoneId}.`,
+                `civil.hour < ${h}`
+              );
             }
           } else if (operator === 'eq') {
             const h = value as number;
-            if (h >= 0 && h <= 23) {
-              const tStart = civilModel.resolve({
-                year: cur.year,
-                month: cur.month,
-                day: cur.day,
-                hour: h,
-                minute: 0,
-                second: 0,
+            const matchingBlocks = hourBlocks.filter((b) => b.hour === h);
+            for (const b of matchingBlocks) {
+              recordProvenance(
+                boundaryRecordMap,
+                b.start,
+                'start',
+                'hour',
+                h,
                 timeZoneId,
-                disambiguation: disambig,
-              });
-              const tEnd =
-                h === 23
-                  ? dayEnd
-                  : civilModel.resolve({
-                      year: cur.year,
-                      month: cur.month,
-                      day: cur.day,
-                      hour: h + 1,
-                      minute: 0,
-                      second: 0,
-                      timeZoneId,
-                      disambiguation: disambig,
-                    });
-              if (tStart.isBefore(tEnd)) {
-                intervals.push(new Interval(tStart, tEnd));
-                recordProvenance(
-                  boundaryRecordMap,
-                  tStart,
-                  'start',
-                  'hour',
-                  h,
-                  timeZoneId,
-                  `Civil time entered hour ${String(h).padStart(2, '0')}:00 in ${timeZoneId}.`,
-                  `civil.hour == ${h}`
-                );
-                recordProvenance(
-                  boundaryRecordMap,
-                  tEnd,
-                  'end',
-                  'hour',
-                  h + 1,
-                  timeZoneId,
-                  `Civil time exited hour ${String(h).padStart(2, '0')}:00 in ${timeZoneId}.`,
-                  `civil.hour == ${h}`
-                );
-              }
-            }
-          } else if (operator === 'neq') {
-            const targetH = value as number;
-            for (let h = 0; h < 24; h++) {
-              if (h !== targetH) {
-                const tStart = civilModel.resolve({
-                  year: cur.year,
-                  month: cur.month,
-                  day: cur.day,
-                  hour: h,
-                  minute: 0,
-                  second: 0,
-                  timeZoneId,
-                  disambiguation: disambig,
-                });
-                const tEnd =
-                  h === 23
-                    ? dayEnd
-                    : civilModel.resolve({
-                        year: cur.year,
-                        month: cur.month,
-                        day: cur.day,
-                        hour: h + 1,
-                        minute: 0,
-                        second: 0,
-                        timeZoneId,
-                        disambiguation: disambig,
-                      });
-                if (tStart.isBefore(tEnd)) {
-                  intervals.push(new Interval(tStart, tEnd));
-                }
-              }
+                `Civil time entered hour ${String(h).padStart(2, '0')}:00 in ${timeZoneId}.`,
+                `civil.hour == ${h}`
+              );
+              recordProvenance(
+                boundaryRecordMap,
+                b.end,
+                'end',
+                'hour',
+                h + 1,
+                timeZoneId,
+                `Civil time exited hour ${String(h).padStart(2, '0')}:00 in ${timeZoneId}.`,
+                `civil.hour == ${h}`
+              );
             }
           } else if (operator === 'in') {
             const hours = value as readonly number[];
-            for (const h of hours) {
-              if (h >= 0 && h <= 23) {
-                const tStart = civilModel.resolve({
-                  year: cur.year,
-                  month: cur.month,
-                  day: cur.day,
-                  hour: h,
-                  minute: 0,
-                  second: 0,
-                  timeZoneId,
-                  disambiguation: disambig,
-                });
-                const tEnd =
-                  h === 23
-                    ? dayEnd
-                    : civilModel.resolve({
-                        year: cur.year,
-                        month: cur.month,
-                        day: cur.day,
-                        hour: h + 1,
-                        minute: 0,
-                        second: 0,
-                        timeZoneId,
-                        disambiguation: disambig,
-                      });
-                if (tStart.isBefore(tEnd)) {
-                  intervals.push(new Interval(tStart, tEnd));
-                  recordProvenance(
-                    boundaryRecordMap,
-                    tStart,
-                    'start',
-                    'hour',
-                    h,
-                    timeZoneId,
-                    `Civil time entered hour ${String(h).padStart(2, '0')}:00 in ${timeZoneId}.`,
-                    `civil.hour in ${JSON.stringify(hours)}`
-                  );
-                  recordProvenance(
-                    boundaryRecordMap,
-                    tEnd,
-                    'end',
-                    'hour',
-                    h + 1,
-                    timeZoneId,
-                    `Civil time exited hour ${String(h).padStart(2, '0')}:00 in ${timeZoneId}.`,
-                    `civil.hour in ${JSON.stringify(hours)}`
-                  );
-                }
-              }
+            const matchingBlocks = hourBlocks.filter((b) => hours.includes(b.hour));
+            for (const b of matchingBlocks) {
+              recordProvenance(
+                boundaryRecordMap,
+                b.start,
+                'start',
+                'hour',
+                b.hour,
+                timeZoneId,
+                `Civil time entered hour ${String(b.hour).padStart(2, '0')}:00 in ${timeZoneId}.`,
+                `civil.hour in ${JSON.stringify(hours)}`
+              );
+              recordProvenance(
+                boundaryRecordMap,
+                b.end,
+                'end',
+                'hour',
+                b.hour + 1,
+                timeZoneId,
+                `Civil time exited hour ${String(b.hour).padStart(2, '0')}:00 in ${timeZoneId}.`,
+                `civil.hour in ${JSON.stringify(hours)}`
+              );
             }
           }
         }
@@ -476,174 +470,150 @@ export function solveCivilCondition(
 
       // 3. Minute property
       else if (property === 'minute') {
-        const disambiguations: ('earlier' | 'later' | 'compatible')[] = isFallBackDay ? ['earlier', 'later'] : ['compatible'];
-        for (const disambig of disambiguations) {
-          for (let h = 0; h < 24; h++) {
-            if (operator === 'between') {
-              const [mStart, mEnd] = value as readonly [number, number];
-              const clampedStart = Math.max(0, Math.min(59, mStart));
-              const clampedEnd = Math.max(0, Math.min(60, mEnd));
-              if (clampedStart < clampedEnd) {
-                const tStart = civilModel.resolve({
-                  year: cur.year,
-                  month: cur.month,
-                  day: cur.day,
-                  hour: h,
-                  minute: clampedStart,
-                  second: 0,
+        const hourBlocks = getHourBlocksForDay(cur.year, cur.month, cur.day, timeZoneId, dayEnd, isFallBackDay);
+        for (const block of hourBlocks) {
+          if (operator === 'between') {
+            const [mStart, mEnd] = value as readonly [number, number];
+            const clampedStart = Math.max(0, Math.min(59, mStart));
+            const clampedEnd = Math.max(0, Math.min(60, mEnd));
+            if (clampedStart < clampedEnd) {
+              const tStart =
+                clampedStart === 0
+                  ? block.start
+                  : civilModel.resolve({
+                      year: cur.year,
+                      month: cur.month,
+                      day: cur.day,
+                      hour: block.hour,
+                      minute: clampedStart,
+                      second: 0,
+                      timeZoneId,
+                      disambiguation: block.disambiguation,
+                    });
+              const tEnd =
+                clampedEnd >= 60
+                  ? block.end
+                  : civilModel.resolve({
+                      year: cur.year,
+                      month: cur.month,
+                      day: cur.day,
+                      hour: block.hour,
+                      minute: clampedEnd,
+                      second: 0,
+                      timeZoneId,
+                      disambiguation: block.disambiguation,
+                    });
+
+              if (tStart.isBefore(tEnd)) {
+                intervals.push(new Interval(tStart, tEnd));
+                recordProvenance(
+                  boundaryRecordMap,
+                  tStart,
+                  'start',
+                  'minute',
+                  clampedStart,
                   timeZoneId,
-                  disambiguation: disambig,
-                });
-                const tEnd =
-                  clampedEnd >= 60
-                    ? h === 23
-                      ? dayEnd
-                      : civilModel.resolve({
-                          year: cur.year,
-                          month: cur.month,
-                          day: cur.day,
-                          hour: h + 1,
-                          minute: 0,
-                          second: 0,
-                          timeZoneId,
-                          disambiguation: disambig,
-                        })
+                  `Civil time entered minute ${String(clampedStart).padStart(2, '0')} in ${timeZoneId}.`,
+                  `civil.minute >= ${clampedStart}`
+                );
+                recordProvenance(
+                  boundaryRecordMap,
+                  tEnd,
+                  'end',
+                  'minute',
+                  clampedEnd,
+                  timeZoneId,
+                  `Civil time exited minute ${String(clampedEnd).padStart(2, '0')} in ${timeZoneId}.`,
+                  `civil.minute < ${clampedEnd}`
+                );
+              }
+            }
+          } else if (operator === 'eq') {
+            const m = value as number;
+            if (m >= 0 && m <= 59) {
+              const tStart =
+                m === 0
+                  ? block.start
+                  : civilModel.resolve({
+                      year: cur.year,
+                      month: cur.month,
+                      day: cur.day,
+                      hour: block.hour,
+                      minute: m,
+                      second: 0,
+                      timeZoneId,
+                      disambiguation: block.disambiguation,
+                    });
+              const tEnd =
+                m === 59
+                  ? block.end
+                  : civilModel.resolve({
+                      year: cur.year,
+                      month: cur.month,
+                      day: cur.day,
+                      hour: block.hour,
+                      minute: m + 1,
+                      second: 0,
+                      timeZoneId,
+                      disambiguation: block.disambiguation,
+                    });
+
+              if (tStart.isBefore(tEnd)) {
+                intervals.push(new Interval(tStart, tEnd));
+                recordProvenance(
+                  boundaryRecordMap,
+                  tStart,
+                  'start',
+                  'minute',
+                  m,
+                  timeZoneId,
+                  `Civil time entered minute ${String(m).padStart(2, '0')} in ${timeZoneId}.`,
+                  `civil.minute == ${m}`
+                );
+                recordProvenance(
+                  boundaryRecordMap,
+                  tEnd,
+                  'end',
+                  'minute',
+                  m + 1,
+                  timeZoneId,
+                  `Civil time exited minute ${String(m).padStart(2, '0')} in ${timeZoneId}.`,
+                  `civil.minute == ${m}`
+                );
+              }
+            }
+          } else {
+            for (let m = 0; m < 60; m++) {
+              if (matchesNumericOp(m, operator, value as number | readonly number[])) {
+                const tStart =
+                  m === 0
+                    ? block.start
                     : civilModel.resolve({
                         year: cur.year,
                         month: cur.month,
                         day: cur.day,
-                        hour: h,
-                        minute: clampedEnd,
+                        hour: block.hour,
+                        minute: m,
                         second: 0,
                         timeZoneId,
-                        disambiguation: disambig,
+                        disambiguation: block.disambiguation,
+                      });
+                const tEnd =
+                  m === 59
+                    ? block.end
+                    : civilModel.resolve({
+                        year: cur.year,
+                        month: cur.month,
+                        day: cur.day,
+                        hour: block.hour,
+                        minute: m + 1,
+                        second: 0,
+                        timeZoneId,
+                        disambiguation: block.disambiguation,
                       });
 
                 if (tStart.isBefore(tEnd)) {
                   intervals.push(new Interval(tStart, tEnd));
-                  recordProvenance(
-                    boundaryRecordMap,
-                    tStart,
-                    'start',
-                    'minute',
-                    clampedStart,
-                    timeZoneId,
-                    `Civil time entered minute ${String(clampedStart).padStart(2, '0')} in ${timeZoneId}.`,
-                    `civil.minute >= ${clampedStart}`
-                  );
-                  recordProvenance(
-                    boundaryRecordMap,
-                    tEnd,
-                    'end',
-                    'minute',
-                    clampedEnd,
-                    timeZoneId,
-                    `Civil time exited minute ${String(clampedEnd).padStart(2, '0')} in ${timeZoneId}.`,
-                    `civil.minute < ${clampedEnd}`
-                  );
-                }
-              }
-            } else if (operator === 'eq') {
-              const m = value as number;
-              if (m >= 0 && m <= 59) {
-                const tStart = civilModel.resolve({
-                  year: cur.year,
-                  month: cur.month,
-                  day: cur.day,
-                  hour: h,
-                  minute: m,
-                  second: 0,
-                  timeZoneId,
-                  disambiguation: disambig,
-                });
-                const tEnd =
-                  m === 59
-                    ? h === 23
-                      ? dayEnd
-                      : civilModel.resolve({
-                          year: cur.year,
-                          month: cur.month,
-                          day: cur.day,
-                          hour: h + 1,
-                          minute: 0,
-                          second: 0,
-                          timeZoneId,
-                          disambiguation: disambig,
-                        })
-                    : civilModel.resolve({
-                        year: cur.year,
-                        month: cur.month,
-                        day: cur.day,
-                        hour: h,
-                        minute: m + 1,
-                        second: 0,
-                        timeZoneId,
-                        disambiguation: disambig,
-                      });
-                if (tStart.isBefore(tEnd)) {
-                  intervals.push(new Interval(tStart, tEnd));
-                  recordProvenance(
-                    boundaryRecordMap,
-                    tStart,
-                    'start',
-                    'minute',
-                    m,
-                    timeZoneId,
-                    `Civil time entered minute ${String(m).padStart(2, '0')} in ${timeZoneId}.`,
-                    `civil.minute == ${m}`
-                  );
-                  recordProvenance(
-                    boundaryRecordMap,
-                    tEnd,
-                    'end',
-                    'minute',
-                    m + 1,
-                    timeZoneId,
-                    `Civil time exited minute ${String(m).padStart(2, '0')} in ${timeZoneId}.`,
-                    `civil.minute == ${m}`
-                  );
-                }
-              }
-            } else {
-              for (let m = 0; m < 60; m++) {
-                if (matchesNumericOp(m, operator, value as number | readonly number[])) {
-                  const tStart = civilModel.resolve({
-                    year: cur.year,
-                    month: cur.month,
-                    day: cur.day,
-                    hour: h,
-                    minute: m,
-                    second: 0,
-                    timeZoneId,
-                    disambiguation: disambig,
-                  });
-                  const tEnd =
-                    m === 59
-                      ? h === 23
-                        ? dayEnd
-                        : civilModel.resolve({
-                            year: cur.year,
-                            month: cur.month,
-                            day: cur.day,
-                            hour: h + 1,
-                            minute: 0,
-                            second: 0,
-                            timeZoneId,
-                            disambiguation: disambig,
-                          })
-                      : civilModel.resolve({
-                          year: cur.year,
-                          month: cur.month,
-                          day: cur.day,
-                          hour: h,
-                          minute: m + 1,
-                          second: 0,
-                          timeZoneId,
-                          disambiguation: disambig,
-                        });
-                  if (tStart.isBefore(tEnd)) {
-                    intervals.push(new Interval(tStart, tEnd));
-                  }
                 }
               }
             }
@@ -656,167 +626,138 @@ export function solveCivilCondition(
         if (window.duration.totalSeconds > 172800) {
           throw new RangeError('second queries are limited to search windows of at most 2 days to maintain performance');
         }
-        const disambiguations: ('earlier' | 'later' | 'compatible')[] = isFallBackDay ? ['earlier', 'later'] : ['compatible'];
-        for (const disambig of disambiguations) {
-          for (let h = 0; h < 24; h++) {
-            for (let m = 0; m < 60; m++) {
-              if (operator === 'between') {
-                const [sStart, sEnd] = value as readonly [number, number];
-                const clampedStart = Math.max(0, Math.min(59, sStart));
-                const clampedEnd = Math.max(0, Math.min(60, sEnd));
-                if (clampedStart < clampedEnd) {
-                  const tStart = civilModel.resolve({
+        const hourBlocks = getHourBlocksForDay(cur.year, cur.month, cur.day, timeZoneId, dayEnd, isFallBackDay);
+        for (const block of hourBlocks) {
+          for (let m = 0; m < 60; m++) {
+            const minStart =
+              m === 0
+                ? block.start
+                : civilModel.resolve({
                     year: cur.year,
                     month: cur.month,
                     day: cur.day,
-                    hour: h,
+                    hour: block.hour,
                     minute: m,
-                    second: clampedStart,
+                    second: 0,
                     timeZoneId,
-                    disambiguation: disambig,
+                    disambiguation: block.disambiguation,
                   });
-                  const tEnd =
-                    clampedEnd >= 60
-                      ? m === 59
-                        ? h === 23
-                          ? dayEnd
-                          : civilModel.resolve({
-                              year: cur.year,
-                              month: cur.month,
-                              day: cur.day,
-                              hour: h + 1,
-                              minute: 0,
-                              second: 0,
-                              timeZoneId,
-                              disambiguation: disambig,
-                            })
-                        : civilModel.resolve({
-                            year: cur.year,
-                            month: cur.month,
-                            day: cur.day,
-                            hour: h,
-                            minute: m + 1,
-                            second: 0,
-                            timeZoneId,
-                            disambiguation: disambig,
-                          })
+            const minEnd =
+              m === 59
+                ? block.end
+                : civilModel.resolve({
+                    year: cur.year,
+                    month: cur.month,
+                    day: cur.day,
+                    hour: block.hour,
+                    minute: m + 1,
+                    second: 0,
+                    timeZoneId,
+                    disambiguation: block.disambiguation,
+                  });
+
+            if (operator === 'between') {
+              const [sStart, sEnd] = value as readonly [number, number];
+              const clampedStart = Math.max(0, Math.min(59, sStart));
+              const clampedEnd = Math.max(0, Math.min(60, sEnd));
+              if (clampedStart < clampedEnd) {
+                const tStart =
+                  clampedStart === 0
+                    ? minStart
+                    : civilModel.resolve({
+                        year: cur.year,
+                        month: cur.month,
+                        day: cur.day,
+                        hour: block.hour,
+                        minute: m,
+                        second: clampedStart,
+                        timeZoneId,
+                        disambiguation: block.disambiguation,
+                      });
+                const tEnd =
+                  clampedEnd >= 60
+                    ? minEnd
+                    : civilModel.resolve({
+                        year: cur.year,
+                        month: cur.month,
+                        day: cur.day,
+                        hour: block.hour,
+                        minute: m,
+                        second: clampedEnd,
+                        timeZoneId,
+                        disambiguation: block.disambiguation,
+                      });
+
+                if (tStart.isBefore(tEnd)) {
+                  intervals.push(new Interval(tStart, tEnd));
+                }
+              }
+            } else if (operator === 'eq') {
+              const s = value as number;
+              if (s >= 0 && s <= 59) {
+                const tStart =
+                  s === 0
+                    ? minStart
+                    : civilModel.resolve({
+                        year: cur.year,
+                        month: cur.month,
+                        day: cur.day,
+                        hour: block.hour,
+                        minute: m,
+                        second: s,
+                        timeZoneId,
+                        disambiguation: block.disambiguation,
+                      });
+                const tEnd =
+                  s === 59
+                    ? minEnd
+                    : civilModel.resolve({
+                        year: cur.year,
+                        month: cur.month,
+                        day: cur.day,
+                        hour: block.hour,
+                        minute: m,
+                        second: s + 1,
+                        timeZoneId,
+                        disambiguation: block.disambiguation,
+                      });
+
+                if (tStart.isBefore(tEnd)) {
+                  intervals.push(new Interval(tStart, tEnd));
+                }
+              }
+            } else {
+              for (let s = 0; s < 60; s++) {
+                if (matchesNumericOp(s, operator, value as number | readonly number[])) {
+                  const tStart =
+                    s === 0
+                      ? minStart
                       : civilModel.resolve({
                           year: cur.year,
                           month: cur.month,
                           day: cur.day,
-                          hour: h,
+                          hour: block.hour,
                           minute: m,
-                          second: clampedEnd,
+                          second: s,
                           timeZoneId,
-                          disambiguation: disambig,
+                          disambiguation: block.disambiguation,
                         });
-                  if (tStart.isBefore(tEnd)) {
-                    intervals.push(new Interval(tStart, tEnd));
-                  }
-                }
-              } else if (operator === 'eq') {
-                const s = value as number;
-                if (s >= 0 && s <= 59) {
-                  const tStart = civilModel.resolve({
-                    year: cur.year,
-                    month: cur.month,
-                    day: cur.day,
-                    hour: h,
-                    minute: m,
-                    second: s,
-                    timeZoneId,
-                    disambiguation: disambig,
-                  });
                   const tEnd =
                     s === 59
-                      ? m === 59
-                        ? h === 23
-                          ? dayEnd
-                          : civilModel.resolve({
-                              year: cur.year,
-                              month: cur.month,
-                              day: cur.day,
-                              hour: h + 1,
-                              minute: 0,
-                              second: 0,
-                              timeZoneId,
-                              disambiguation: disambig,
-                            })
-                        : civilModel.resolve({
-                            year: cur.year,
-                            month: cur.month,
-                            day: cur.day,
-                            hour: h,
-                            minute: m + 1,
-                            second: 0,
-                            timeZoneId,
-                            disambiguation: disambig,
-                          })
+                      ? minEnd
                       : civilModel.resolve({
                           year: cur.year,
                           month: cur.month,
                           day: cur.day,
-                          hour: h,
+                          hour: block.hour,
                           minute: m,
                           second: s + 1,
                           timeZoneId,
-                          disambiguation: disambig,
+                          disambiguation: block.disambiguation,
                         });
+
                   if (tStart.isBefore(tEnd)) {
                     intervals.push(new Interval(tStart, tEnd));
-                  }
-                }
-              } else {
-                for (let s = 0; s < 60; s++) {
-                  if (matchesNumericOp(s, operator, value as number | readonly number[])) {
-                    const tStart = civilModel.resolve({
-                      year: cur.year,
-                      month: cur.month,
-                      day: cur.day,
-                      hour: h,
-                      minute: m,
-                      second: s,
-                      timeZoneId,
-                      disambiguation: disambig,
-                    });
-                    const tEnd =
-                      s === 59
-                        ? m === 59
-                          ? h === 23
-                            ? dayEnd
-                            : civilModel.resolve({
-                                year: cur.year,
-                                month: cur.month,
-                                day: cur.day,
-                                hour: h + 1,
-                                minute: 0,
-                                second: 0,
-                                timeZoneId,
-                                disambiguation: disambig,
-                              })
-                          : civilModel.resolve({
-                              year: cur.year,
-                              month: cur.month,
-                              day: cur.day,
-                              hour: h,
-                              minute: m + 1,
-                              second: 0,
-                              timeZoneId,
-                              disambiguation: disambig,
-                            })
-                        : civilModel.resolve({
-                            year: cur.year,
-                            month: cur.month,
-                            day: cur.day,
-                            hour: h,
-                            minute: m,
-                            second: s + 1,
-                            timeZoneId,
-                            disambiguation: disambig,
-                          });
-                    if (tStart.isBefore(tEnd)) {
-                      intervals.push(new Interval(tStart, tEnd));
-                    }
                   }
                 }
               }

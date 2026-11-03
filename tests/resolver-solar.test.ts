@@ -405,5 +405,86 @@ describe('Phase 3B — Continuous Solar Condition Solver', () => {
       const startPos = ChronoFlux.solar.evaluatePosition(iv.start, singapore);
       expect(Math.abs(startPos.geometricElevationDeg - 85.0)).toBeLessThan(1e-5);
     });
+
+    it('resolves near-zenith azimuth conditions and records wrap provenance (Singapore equinox)', () => {
+      const singapore = new Place({
+        latitude: 1.3521,
+        longitude: 103.8198,
+        timeZoneId: 'Asia/Singapore',
+      });
+      const equinoxWindow = new Interval(
+        Instant.fromJSON('2026-03-21T00:00:00.000Z'),
+        Instant.fromJSON('2026-03-22T00:00:00.000Z')
+      );
+
+      const result = ChronoFlux.resolve({
+        place: singapore,
+        within: equinoxWindow,
+        where: Conditions.solar.azimuth.gte(180),
+      });
+
+      expect(result.intervals.intervals.length).toBe(1);
+      const exp = result.report.explanations[0]!;
+
+      // Start boundary: genuine continuous threshold crossing at 180°
+      expect(exp.startExplanation.details?.isWrapBoundary).toBe(false);
+      expect(exp.startExplanation.details?.boundaryCategory).toBe('threshold_crossing');
+      expect(exp.startExplanation.details?.residualDeg).toBeDefined();
+      expect(exp.startExplanation.details!.residualDeg!).toBeLessThan(1e-4);
+
+      // End boundary: wraps through North (360°/0° branch cut)
+      expect(exp.endExplanation.details?.isWrapBoundary).toBe(true);
+      expect(exp.endExplanation.details?.boundaryCategory).toBe('azimuth_wrap');
+      expect(exp.endExplanation.details?.residualDeg).toBeUndefined();
+      expect(exp.endExplanation.reason).toContain('azimuth wrapped');
+    });
+
+    it('resolves high-latitude azimuth wraparound through North at midnight sun (Tromsø solstice)', () => {
+      const tromso = new Place({
+        latitude: 69.6492,
+        longitude: 18.9553,
+        timeZoneId: 'Europe/Oslo',
+      });
+      const solsticeWindow = new Interval(
+        Instant.fromJSON('2026-06-21T00:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T00:00:00.000Z')
+      );
+
+      // 1. Azimuth range [350°, 10°] wrapping through 0° North
+      const resultWrap = ChronoFlux.resolve({
+        place: tromso,
+        within: solsticeWindow,
+        where: Conditions.solar.azimuth.between(350, 10),
+      });
+
+      expect(resultWrap.intervals.intervals.length).toBe(1);
+      const wrapExp = resultWrap.report.explanations[0]!;
+      // Start is continuous crossing at 350°
+      expect(wrapExp.startExplanation.details?.isWrapBoundary).toBe(false);
+      expect(wrapExp.startExplanation.details?.boundaryCategory).toBe('threshold_crossing');
+      expect(wrapExp.startExplanation.details?.residualDeg).toBeDefined();
+      expect(wrapExp.startExplanation.details!.residualDeg!).toBeLessThan(1e-4);
+
+      // End is continuous crossing at 10°
+      expect(wrapExp.endExplanation.details?.isWrapBoundary).toBe(false);
+      expect(wrapExp.endExplanation.details?.boundaryCategory).toBe('threshold_crossing');
+      expect(wrapExp.endExplanation.details?.residualDeg).toBeDefined();
+      expect(wrapExp.endExplanation.details!.residualDeg!).toBeLessThan(1e-4);
+
+      // 2. Azimuth >= 350° ending at 360°/0° North wrap
+      const resultGte = ChronoFlux.resolve({
+        place: tromso,
+        within: solsticeWindow,
+        where: Conditions.solar.azimuth.gte(350),
+      });
+
+      expect(resultGte.intervals.intervals.length).toBe(1);
+      const gteExp = resultGte.report.explanations[0]!;
+      expect(gteExp.startExplanation.details?.isWrapBoundary).toBe(false);
+      expect(gteExp.startExplanation.details?.boundaryCategory).toBe('threshold_crossing');
+      expect(gteExp.endExplanation.details?.isWrapBoundary).toBe(true);
+      expect(gteExp.endExplanation.details?.boundaryCategory).toBe('azimuth_wrap');
+      expect(gteExp.endExplanation.details?.residualDeg).toBeUndefined();
+    });
   });
 });

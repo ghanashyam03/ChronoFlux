@@ -541,6 +541,136 @@ describe('Phase 3B — Discrete Civil Condition Solver', () => {
         expect(orQuery.intervals.intervals[2]!.start.toISOString()).toBe('2026-11-01T06:15:00.000Z');
         expect(orQuery.intervals.intervals[3]!.start.toISOString()).toBe('2026-11-01T06:30:00.000Z');
       });
+
+      it('isolates unambiguous hour == 0 to exactly 1 hour without leaking into repeated hour 1', () => {
+        const result = ChronoFlux.resolve({
+          place: newYork,
+          within: repeatedHourWindow,
+          where: Conditions.civil.hour.eq(0),
+        });
+
+        // Hour 0 occurs exactly once: 00:00 EDT (04:00Z) to 01:00 EDT (05:00Z).
+        // Must NOT leak into repeated hour 1 (05:00Z to 06:00Z).
+        expect(result.intervals.intervals.length).toBe(1);
+        const interval = result.intervals.intervals[0]!;
+        expect(interval.start.toISOString()).toBe('2026-11-01T04:00:00.000Z');
+        expect(interval.end.toISOString()).toBe('2026-11-01T05:00:00.000Z');
+        expect(interval.duration.totalHours).toBe(1);
+      });
+
+      it('resolves hour < 1 and hour between 0 and 1 strictly up to the first occurrence of hour 1', () => {
+        const lt1 = ChronoFlux.resolve({
+          place: newYork,
+          within: repeatedHourWindow,
+          where: Conditions.civil.hour.lt(1),
+        });
+        expect(lt1.intervals.intervals.length).toBe(1);
+        expect(lt1.intervals.intervals[0]!.start.toISOString()).toBe('2026-11-01T04:00:00.000Z');
+        expect(lt1.intervals.intervals[0]!.end.toISOString()).toBe('2026-11-01T05:00:00.000Z');
+        expect(lt1.intervals.intervals[0]!.duration.totalHours).toBe(1);
+
+        const between01 = ChronoFlux.resolve({
+          place: newYork,
+          within: repeatedHourWindow,
+          where: Conditions.civil.hour.between(0, 1),
+        });
+        expect(between01.intervals.intervals.length).toBe(1);
+        expect(between01.intervals.intervals[0]!.start.toISOString()).toBe('2026-11-01T04:00:00.000Z');
+        expect(between01.intervals.intervals[0]!.end.toISOString()).toBe('2026-11-01T05:00:00.000Z');
+        expect(between01.intervals.intervals[0]!.duration.totalHours).toBe(1);
+      });
+
+      it('ensures hour != 1 strictly excludes all physical occurrences of repeated hour 1', () => {
+        const neq1 = ChronoFlux.resolve({
+          place: newYork,
+          within: repeatedHourWindow,
+          where: Conditions.civil.hour.neq(1),
+        });
+
+        // repeatedHourWindow is [04:00Z, 08:00Z).
+        // Hour 1 spans [05:00Z, 07:00Z).
+        // neq1 should match [04:00Z, 05:00Z) (hour 0) and [07:00Z, 08:00Z) (hour 2).
+        expect(neq1.intervals.intervals.length).toBe(2);
+        expect(neq1.intervals.intervals[0]!.start.toISOString()).toBe('2026-11-01T04:00:00.000Z');
+        expect(neq1.intervals.intervals[0]!.end.toISOString()).toBe('2026-11-01T05:00:00.000Z');
+        expect(neq1.intervals.intervals[1]!.start.toISOString()).toBe('2026-11-01T07:00:00.000Z');
+        expect(neq1.intervals.intervals[1]!.end.toISOString()).toBe('2026-11-01T08:00:00.000Z');
+      });
+
+      it('evaluates minute == 59 strictly as 1-minute intervals across repeated hour boundaries', () => {
+        const result = ChronoFlux.resolve({
+          place: newYork,
+          within: repeatedHourWindow,
+          where: Conditions.civil.minute.eq(59),
+        });
+
+        // 4 hours in repeatedHourWindow [04:00Z, 08:00Z):
+        // hour 0 (EDT): 04:59Z - 05:00Z
+        // hour 1 (EDT): 05:59Z - 06:00Z
+        // hour 1 (EST): 06:59Z - 07:00Z
+        // hour 2 (EST): 07:59Z - 08:00Z
+        // Each interval must have duration exactly 60 seconds (no multi-hour stretching)
+        expect(result.intervals.intervals.length).toBe(4);
+        for (const iv of result.intervals.intervals) {
+          expect(iv.duration.totalSeconds).toBe(60);
+        }
+        expect(result.intervals.intervals[0]!.start.toISOString()).toBe('2026-11-01T04:59:00.000Z');
+        expect(result.intervals.intervals[1]!.start.toISOString()).toBe('2026-11-01T05:59:00.000Z');
+        expect(result.intervals.intervals[2]!.start.toISOString()).toBe('2026-11-01T06:59:00.000Z');
+        expect(result.intervals.intervals[3]!.start.toISOString()).toBe('2026-11-01T07:59:00.000Z');
+      });
+
+      it('synthesizes southern hemisphere repeated hour correctly (Australia/Sydney on April 5, 2026)', () => {
+        // Sydney falls back on 2026-04-05 from 03:00 AEDT (UTC+11) to 02:00 AEST (UTC+10).
+        // Hour 2 repeats:
+        // - 1st occurrence (AEDT, UTC+11): 15:00 UTC to 16:00 UTC
+        // - 2nd occurrence (AEST, UTC+10): 16:00 UTC to 17:00 UTC
+        const sydney = new Place({
+          latitude: -33.8688,
+          longitude: 151.2093,
+          timeZoneId: 'Australia/Sydney',
+        });
+        const sydneyWindow = new Interval(
+          Instant.fromJSON('2026-04-04T13:00:00.000Z'), // 00:00 AEDT
+          Instant.fromJSON('2026-04-04T18:00:00.000Z')  // 04:00 AEST
+        );
+
+        // 1. hour == 2 synthesizes canonical 2-hour interval
+        const hour2 = ChronoFlux.resolve({
+          place: sydney,
+          within: sydneyWindow,
+          where: Conditions.civil.hour.eq(2),
+        });
+        expect(hour2.intervals.intervals.length).toBe(1);
+        expect(hour2.intervals.intervals[0]!.start.toISOString()).toBe('2026-04-04T15:00:00.000Z');
+        expect(hour2.intervals.intervals[0]!.end.toISOString()).toBe('2026-04-04T17:00:00.000Z');
+        expect(hour2.intervals.intervals[0]!.duration.totalHours).toBe(2);
+
+        // 2. minute == 15 inside repeated hour synthesizes both occurrences
+        const twoHourSydney = new Interval(
+          Instant.fromJSON('2026-04-04T15:00:00.000Z'),
+          Instant.fromJSON('2026-04-04T17:00:00.000Z')
+        );
+        const min15 = ChronoFlux.resolve({
+          place: sydney,
+          within: twoHourSydney,
+          where: Conditions.civil.minute.eq(15),
+        });
+        expect(min15.intervals.intervals.length).toBe(2);
+        expect(min15.intervals.intervals[0]!.start.toISOString()).toBe('2026-04-04T15:15:00.000Z');
+        expect(min15.intervals.intervals[1]!.start.toISOString()).toBe('2026-04-04T16:15:00.000Z');
+
+        // 3. hour == 1 occurs strictly once (14:00Z to 15:00Z)
+        const hour1 = ChronoFlux.resolve({
+          place: sydney,
+          within: sydneyWindow,
+          where: Conditions.civil.hour.eq(1),
+        });
+        expect(hour1.intervals.intervals.length).toBe(1);
+        expect(hour1.intervals.intervals[0]!.start.toISOString()).toBe('2026-04-04T14:00:00.000Z');
+        expect(hour1.intervals.intervals[0]!.end.toISOString()).toBe('2026-04-04T15:00:00.000Z');
+        expect(hour1.intervals.intervals[0]!.duration.totalHours).toBe(1);
+      });
     });
   });
 });
