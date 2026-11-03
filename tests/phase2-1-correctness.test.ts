@@ -422,7 +422,8 @@ describe('Phase 2.1 Scientific & Semantic Correctness Audit', () => {
       // 67.0°N (Inside Arctic Circle): perpetual midnight sun
       const stateAbove = ChronoFlux.solar.evaluate(summerAnchor, arcticAbove);
       expect(stateAbove.isPolarDay).toBe(true);
-      expect(stateAbove.phase).toBe('polar_day');
+      expect(stateAbove.polarRegime).toBe('polar_day');
+      expect(stateAbove.phase).toBe('day');
     });
 
     it('handles tangential threshold grazing crossings near midnight sun boundary (65.72°N)', () => {
@@ -452,7 +453,8 @@ describe('Phase 2.1 Scientific & Semantic Correctness Audit', () => {
       const antarcticPolarNight = ChronoFlux.place({ latitude: -68.0, longitude: 0.0, timeZoneId: 'UTC' });
       const stateAbove = ChronoFlux.solar.evaluate(winterAnchor, antarcticPolarNight);
       expect(stateAbove.isPolarNight).toBe(true);
-      expect(stateAbove.phase).toBe('polar_night');
+      expect(stateAbove.polarRegime).toBe('polar_night');
+      expect(stateAbove.phase).toBe('night');
     });
 
     it('handles azimuth-indeterminate positions explicitly (zenith and poles)', () => {

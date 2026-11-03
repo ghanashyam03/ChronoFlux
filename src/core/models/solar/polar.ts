@@ -14,7 +14,7 @@ import {
   NAUTICAL_TWILIGHT_ELEVATION_DEG,
   NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
 } from './math.js';
-import { SolarPhase } from './types.js';
+import { PolarRegimeType, SolarPhase } from './types.js';
 
 /**
  * Standard horizon threshold for direct sunlight and sunrise/sunset (-0.8333°).
@@ -26,6 +26,7 @@ export const DIRECT_SUNLIGHT_THRESHOLD_DEG = NOMINAL_SUNRISE_SUNSET_ELEVATION_DE
 export interface PolarRegime {
   readonly isPolarDay: boolean;
   readonly isPolarNight: boolean;
+  readonly polarRegime: PolarRegimeType;
   readonly solarNoon: Instant;
   readonly solarMidnight: Instant;
   readonly maxGeometricElevationDeg: number;
@@ -53,6 +54,7 @@ export function evaluatePolarRegime(place: Place, instant: Instant): PolarRegime
     return {
       isPolarDay: false,
       isPolarNight: false,
+      polarRegime: 'none',
       solarNoon: noon,
       solarMidnight: midnight,
       maxGeometricElevationDeg: coordsNoon.geometricElevationDeg,
@@ -72,10 +74,12 @@ export function evaluatePolarRegime(place: Place, instant: Instant): PolarRegime
 
   // Polar Night: geometric elevation never reaches nominal horizon (-0.8333°)
   const isPolarNight = maxGeometricElevationDeg < DIRECT_SUNLIGHT_THRESHOLD_DEG;
+  const polarRegime: PolarRegimeType = isPolarDay ? 'polar_day' : isPolarNight ? 'polar_night' : 'none';
 
   return {
     isPolarDay,
     isPolarNight,
+    polarRegime,
     solarNoon: noon,
     solarMidnight: midnight,
     maxGeometricElevationDeg,
@@ -86,17 +90,14 @@ export function evaluatePolarRegime(place: Place, instant: Instant): PolarRegime
 }
 
 /**
- * Classifies the solar phase based on geometric elevation and polar regime.
+ * Classifies the solar phase based strictly on instantaneous geometric elevation.
+ *
  * All twilight thresholds (civil -6°, nautical -12°, astronomical -18°) are astronomically defined
- * on geometric solar elevation h_geom.
+ * on geometric solar elevation h_geom. Polar regime ('polar_day' | 'polar_night') is decoupled
+ * so that locations in polar night correctly report civil, nautical, or astronomical twilight
+ * or night according to instantaneous solar elevation.
  */
-export function classifySolarPhase(geometricElevationDeg: number, regime: PolarRegime): SolarPhase {
-  if (regime.isPolarDay) {
-    return 'polar_day';
-  }
-  if (regime.isPolarNight) {
-    return 'polar_night';
-  }
+export function classifySolarPhase(geometricElevationDeg: number): SolarPhase {
   if (geometricElevationDeg >= DIRECT_SUNLIGHT_THRESHOLD_DEG) {
     return 'day';
   }
@@ -111,3 +112,4 @@ export function classifySolarPhase(geometricElevationDeg: number, regime: PolarR
   }
   return 'night';
 }
+

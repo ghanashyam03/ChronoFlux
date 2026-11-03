@@ -8,7 +8,7 @@ import { Instant } from '../../primitives/instant.js';
 import { Place } from '../../primitives/place.js';
 import { ModelMetadata, TemporalModel } from '../model.js';
 import { getFormatter, safeDateUtc, resolveCivilDateTimeToInstant } from './disambiguation.js';
-import { CivilDateTimeInput, CivilState, CivilTimeProvenance, TimeZoneLookupProvider } from './types.js';
+import { CivilDateTimeInput, CivilState, CivilTimeProvenance, DstConfidence, TimeZoneLookupProvider } from './types.js';
 
 /**
  * Returns provenance metadata about the runtime environment and IANA tz database.
@@ -159,16 +159,36 @@ function getTimeZoneNameFormatter(timeZoneId: string): Intl.DateTimeFormat {
   return fmt;
 }
 
+interface DstEvaluationResult {
+  readonly isDaylightSaving: boolean;
+  readonly dstConfidence: DstConfidence;
+}
+
 /**
- * Robustly evaluates whether Daylight Saving Time is actively in effect.
+ * Robustly evaluates whether Daylight Saving Time is actively in effect,
+ * preserving exact IANA UTC offset and qualifying classification confidence.
  *
  * Distinct from physical UTC offset:
- * 1. Inspects explicit IANA timeZoneName ('Daylight Time' / 'Summer Time' vs 'Standard Time').
- * 2. For jurisdictions with numeric or non-descriptive names (e.g. Morocco Ramadan shifts),
- *    evaluates against the full annual offset distribution across all 12 months for that calendar year.
- * 3. Never falsely flags non-DST timezones (e.g. Asia/Kolkata, Asia/Tokyo, America/Phoenix) as DST.
+ * 1. Checks annual profile: if minOffset == maxOffset all year (e.g. UTC, Asia/Tokyo,
+ *    Asia/Kolkata, America/Phoenix), DST is authoritatively false.
+ * 2. Inspects runtime-derived IANA timeZoneName ('Daylight Time' / 'Summer Time' vs 'Standard Time').
+ *    - Note: "Irish Standard Time" (Europe/Dublin) is statutory summer daylight saving time (UTC+1 vs winter GMT UTC+0).
+ *    If an unambiguous daylight/summer/standard marker is present, returns with 'authoritative' confidence.
+ * 3. In jurisdictions with numeric or non-descriptive runtime names (e.g. Morocco Ramadan shifts,
+ *    wartime double DST, or administrative offset transitions), falls back to annual offset distribution
+ *    and returns with 'heuristic' confidence, clearly documenting runtime limitations.
  */
-function isDstActive(epochMs: number, currentOffsetMs: number, timeZoneId: string, year: number): boolean {
+function evaluateDstStatus(
+  epochMs: number,
+  currentOffsetMs: number,
+  timeZoneId: string,
+  year: number
+): DstEvaluationResult {
+  const profile = getAnnualTzProfile(timeZoneId, year);
+  if (!profile.hasDstTransitions) {
+    return { isDaylightSaving: false, dstConfidence: 'authoritative' };
+  }
+
   try {
     const formatter = getTimeZoneNameFormatter(timeZoneId);
     const parts = formatter.formatToParts(new Date(epochMs));
@@ -176,23 +196,25 @@ function isDstActive(epochMs: number, currentOffsetMs: number, timeZoneId: strin
 
     if (tzNamePart) {
       if (/daylight|summer/i.test(tzNamePart)) {
-        return true;
+        return { isDaylightSaving: true, dstConfidence: 'authoritative' };
       }
       // Note: "Irish Standard Time" (Europe/Dublin) is statutory summer daylight saving time (UTC+1 vs winter GMT UTC+0).
-      if (/standard/i.test(tzNamePart) && !/irish/i.test(tzNamePart)) {
-        return false;
+      if (/standard/i.test(tzNamePart)) {
+        if (/irish/i.test(tzNamePart)) {
+          return { isDaylightSaving: true, dstConfidence: 'authoritative' };
+        }
+        return { isDaylightSaving: false, dstConfidence: 'authoritative' };
       }
     }
   } catch {
-    // Fall back to annual offset distribution
+    // Fall back to heuristic
   }
 
-  const profile = getAnnualTzProfile(timeZoneId, year);
-  if (!profile.hasDstTransitions) {
-    return false;
-  }
-  return currentOffsetMs > profile.minOffsetMs;
+  // Fall back to annual offset distribution heuristic
+  const isGreater = currentOffsetMs > profile.minOffsetMs;
+  return { isDaylightSaving: isGreater, dstConfidence: 'heuristic' };
 }
+
 
 /**
  * Checks if the current instant falls inside an ambiguous repeated hour (fall-back transition).
@@ -324,7 +346,7 @@ export class CivilModel implements TemporalModel<CivilState> {
     const { epochMs, nanosecond } = splitEpochNanoseconds(instant.epochNanoseconds);
 
     const local = extractLocalParts(epochMs, cleanTz);
-    const isDaylightSaving = isDstActive(epochMs, local.offsetMs, cleanTz, local.year);
+    const dst = evaluateDstStatus(epochMs, local.offsetMs, cleanTz, local.year);
     const isAmbiguous = checkIsAmbiguous(epochMs, local, cleanTz);
 
     const state: CivilState = Object.freeze({
@@ -339,7 +361,8 @@ export class CivilModel implements TemporalModel<CivilState> {
       timeZoneId: cleanTz,
       utcOffset: Duration.fromMilliseconds(local.offsetMs),
       utcOffsetMinutes: local.offsetMs / 60000,
-      isDaylightSaving,
+      isDaylightSaving: dst.isDaylightSaving,
+      dstConfidence: dst.dstConfidence,
       transition: Object.freeze({
         isAmbiguous,
         isNonExistent: false, // Evaluated physical instants always exist

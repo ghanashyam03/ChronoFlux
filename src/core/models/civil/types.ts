@@ -51,6 +51,17 @@ export interface CivilTransitionInfo {
 }
 
 /**
+ * Confidence level of Daylight Saving Time (DST) determination.
+ *
+ * - 'authoritative': Confirmed via explicit IANA time zone name indicator (e.g. 'Daylight Time',
+ *                   'Summer Time', 'Standard Time', or non-DST zones with constant annual offset).
+ * - 'heuristic':     Inferred solely from annual offset comparisons in jurisdictions with numeric
+ *                   or non-descriptive runtime timezone names (e.g. Morocco Ramadan shifts or administrative shifts).
+ * - 'unknown':       Indeterminate due to runtime environment limitations.
+ */
+export type DstConfidence = 'authoritative' | 'heuristic' | 'unknown';
+
+/**
  * Comprehensive civil time representation for a given Instant and IANA Time Zone.
  */
 export interface CivilState {
@@ -66,6 +77,7 @@ export interface CivilState {
   readonly utcOffset: Duration;
   readonly utcOffsetMinutes: number;
   readonly isDaylightSaving: boolean;
+  readonly dstConfidence: DstConfidence;
   readonly transition?: CivilTransitionInfo;
 }
 

@@ -138,6 +138,15 @@ npm run build
   - Safeguarded root-finding: bracketed hybrid Newton-Raphson/bisection solver; verified across polar circle latitudes ($66.0^\circ, 66.564^\circ, 67.0^\circ, -68.0^\circ$); explicit indeterminate azimuth indicators at zenith, nadir, and geographic poles; elevation residual verification.
   - Performance & reproducibility: instantaneous position evaluation (`solar.evaluatePosition`), bounded diurnal cycle event cache (up to 50x speedup), civil time database runtime provenance exposure, and fractional `searchLimitDays` hardening.
   - 251/251 passing tests with 97.19% line coverage and 0 build errors.
+- [x] **Phase 2.2 — Numerical Reliability & Temporal Semantics**:
+  - Polar root-finding: genuine bracketed Brent-Dekker solver with explicit convergence status and residual verification ($|h(t) - \theta| < 10^{-5\circ}$) in `math.ts`.
+  - Exact diurnal cache key precision: coordinate and observer elevation stringification (`${lat},${lon},${elev}:${noonSeconds}`) without lossy truncation.
+  - Uncertainty semantics: separated instantaneous angular uncertainty $\Delta h(t)$, threshold-crossing sensitivity $|dh/dt|$ (`crossingSensitivityDegPerMin`), and physical event-crossing uncertainties (`sunriseUncertaintyMinutes`, `sunsetUncertaintyMinutes`) evaluated at actual event instants.
+  - Polar regime decoupled from solar illumination phase: diurnal `polarRegime` (`'none' | 'polar_day' | 'polar_night'`) independent from instantaneous `phase` (`'day' | 'civil_twilight' | 'nautical_twilight' | 'astronomical_twilight' | 'night'`). Polar night correctly reports twilight when elevation is between -6° and -0.833°.
+  - Astronomical time-scale policy: documented relationship between Unix Instant, UTC, UT1, TAI, and TT; extensible `AstronomicalTimeScale` interface and `StandardAstronomicalTimeScale` provider (`timescale.ts`) computing $\Delta T(t)$.
+  - Validity enforcement: explicit `isWithinValidityRange` (1800-2100 CE) and `isAccuracyDegraded` flags with quadratic ephemeris error expansion when extrapolated.
+  - Civil DST classification: preserved exact IANA offset while qualifying DST determination with `dstConfidence: 'authoritative' | 'heuristic' | 'unknown'`.
+  - Reproducible performance benchmarks: measured empirical throughput (~4.1 µs/op for `evaluatePosition`, ~13.8 µs/op for cached `evaluate`), 275/275 tests passing with 97.52% line coverage.
 - [ ] **Phase 3 — Temporal Conditions & Resolver**: Typed Condition AST, continuous root-finding/bisection, and explainable interval synthesis.
 - [ ] **Phase 4 — Developer SDK & Benchmarks**: Golden vector NOAA validation and public facade packaging.
 - [ ] **Phase 5 — Visual Diagnostic Suite**: Interactive spacetime ribbon, solar curves, and developer query console.

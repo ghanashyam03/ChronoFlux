@@ -335,12 +335,14 @@ export function calcSolarAzimuth(
 }
 
 /**
- * Calculates dynamic coordinate and event-time uncertainties.
+ * Calculates dynamic coordinate, sensitivity, and event-time uncertainties.
  * Separates:
- * 1. Ephemeris numerical approximation error (±0.01°)
- * 2. Atmospheric refraction model uncertainty (~10% of refraction, up to ±0.08° at horizon)
- * 3. Dynamic event-time uncertainty: Delta t = Delta h / |dh/dt|
- * 4. Observer horizon limitation dip from elevation above sea level
+ * 1. Ephemeris numerical approximation error (assumed ±0.01° for 1800-2100 CE; expanding when extrapolated)
+ * 2. Atmospheric refraction model uncertainty (~12% of refraction at nominal 1010 mbar, 10°C)
+ * 3. Combined instantaneous coordinate error: Delta h(t) = sqrt(num^2 + refr^2)
+ * 4. Instantaneous threshold-crossing sensitivity: |dh/dt| in deg/min
+ * 5. Dynamic event-time uncertainty: Delta t = Delta h / |dh/dt|
+ * 6. Observer horizon limitation dip from elevation above sea level
  */
 export function calcSolarUncertainty(
   latitudeDeg: number,
@@ -348,9 +350,19 @@ export function calcSolarUncertainty(
   geometricElevationDeg: number,
   hourAngleDeg: number,
   refractionDeg: number,
-  elevationMeters: number = 0
+  elevationMeters: number = 0,
+  tJulianCentury?: number
 ) {
-  const numericalErrorDeg = 0.01;
+  // Truncated ephemeris error is ±0.01° within 1800-2100 CE (|t| <= 1.0).
+  // Degrades quadratically for centuries outside this validity range.
+  let numericalErrorDeg = 0.01;
+  if (tJulianCentury !== undefined) {
+    const centuryExcess = Math.max(0, Math.abs(tJulianCentury) - 1.0);
+    if (centuryExcess > 0) {
+      numericalErrorDeg = 0.01 + 0.05 * centuryExcess * centuryExcess;
+    }
+  }
+
   const atmosphericRefractionUncertaintyDeg = Math.max(0.001, refractionDeg * 0.12);
   const combinedCoordinateUncertaintyDeg = Math.sqrt(
     numericalErrorDeg * numericalErrorDeg +
@@ -387,9 +399,39 @@ export function calcSolarUncertainty(
     numericalErrorDeg,
     atmosphericRefractionUncertaintyDeg,
     combinedCoordinateUncertaintyDeg,
+    crossingSensitivityDegPerMin: dhDtPerMin,
     eventTimeUncertaintyMinutes,
+    sunriseUncertaintyMinutes: null as number | null,
+    sunsetUncertaintyMinutes: null as number | null,
     horizonLimitationDeg,
   };
+}
+
+/**
+ * Calculates event-crossing time uncertainty evaluated at the actual event instant (e.g. sunrise or sunset).
+ * Delta t = Delta h_horizon / |dh/dt|_{event}
+ */
+export function calcSolarCrossingUncertainty(
+  place: Place,
+  eventInstant: Instant,
+  _targetElevationDeg: number = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG
+): number {
+  const coords = computeSolarCoordinates(eventInstant, place);
+  const deltaH = coords.uncertainty.combinedCoordinateUncertaintyDeg;
+  const dhDtPerMin = coords.uncertainty.crossingSensitivityDegPerMin;
+
+  if (dhDtPerMin > 1e-5) {
+    return deltaH / dhDtPerMin;
+  }
+  // Tangential / grazing crossing: curvature d2h/dt2 governs transit uncertainty
+  const phiRad = degToRad(place.latitude);
+  const deltaRad = degToRad(coords.declinationDeg);
+  const omegaMin = degToRad(0.25);
+  const d2hDt2 = Math.abs(Math.cos(phiRad) * Math.cos(deltaRad)) * omegaMin * omegaMin;
+  if (d2hDt2 > 1e-8) {
+    return Math.sqrt((2 * degToRad(deltaH)) / d2hDt2);
+  }
+  return 60.0;
 }
 
 /**
@@ -424,8 +466,10 @@ export function computeSolarCoordinates(instant: Instant, place: Place) {
     angles.geometricElevationDeg,
     hourAngleDeg,
     angles.atmosphericRefractionDeg,
-    place.elevationMeters ?? 0
+    place.elevationMeters ?? 0,
+    t
   );
+
 
   return {
     t,
@@ -537,14 +581,13 @@ export function findSolarCrossing(
 
   // Polar singularity (|latitude| >= 89.99°): elevation is purely governed by seasonal declination delta(t).
   if (Math.abs(cosPhi) < 1e-4) {
-    const noonCoords = computeSolarCoordinates(noon, place);
-    const noonElev = noonCoords.geometricElevationDeg;
+    const TWELVE_HOURS_NS = 43_200_000_000_000n;
+    const aNs = noon.epochNanoseconds - TWELVE_HOURS_NS;
+    const bNs = noon.epochNanoseconds + TWELVE_HOURS_NS;
+    let fA = computeSolarCoordinates(Instant.fromEpochNanoseconds(aNs), place).geometricElevationDeg - targetElevationDeg;
+    let fB = computeSolarCoordinates(Instant.fromEpochNanoseconds(bNs), place).geometricElevationDeg - targetElevationDeg;
 
-    // Check rate of change of elevation across 1 day
-    const tomorrowNs = noon.epochNanoseconds + 86_400_000_000_000n;
-    const tomorrowCoords = computeSolarCoordinates(Instant.fromEpochNanoseconds(tomorrowNs), place);
-    const dElevPerDay = tomorrowCoords.geometricElevationDeg - noonElev;
-
+    const dElevPerDay = fB - fA;
     if (Math.abs(dElevPerDay) < 1e-6) {
       return null;
     }
@@ -554,42 +597,97 @@ export function findSolarCrossing(
       return null;
     }
 
-    const deltaElev = targetElevationDeg - noonElev;
-    const fractionOfDay = deltaElev / dElevPerDay;
-    if (fractionOfDay < -0.5 || fractionOfDay > 0.5) {
+    if (Math.abs(fA) < 1e-5) {
+      return Instant.fromEpochNanoseconds(aNs);
+    }
+    if (Math.abs(fB) < 1e-5) {
+      return Instant.fromEpochNanoseconds(bNs);
+    }
+
+    // Bracket check: crossing must lie strictly within [aNs, bNs]
+    if (fA * fB > 0) {
       return null;
     }
 
-    let aNs = noon.epochNanoseconds - 43_200_000_000_000n;
-    let bNs = noon.epochNanoseconds + 43_200_000_000_000n;
-    const fA = computeSolarCoordinates(Instant.fromEpochNanoseconds(aNs), place).geometricElevationDeg - targetElevationDeg;
-    const fB = computeSolarCoordinates(Instant.fromEpochNanoseconds(bNs), place).geometricElevationDeg - targetElevationDeg;
+    // Genuine bracketed root-finding (Brent-Dekker) with explicit convergence status and residual verification
+    let a = aNs;
+    let b = bNs;
+    let c = a;
+    let fc = fA;
+    let d = 0n;
+    let mflag = true;
 
-    if (fA * fB > 0 && Math.abs(fA) > 1e-4 && Math.abs(fB) > 1e-4) {
-      return null;
-    }
-
-    let curNs = noon.epochNanoseconds + BigInt(Math.round(fractionOfDay * 86_400_000_000_000));
-    for (let iter = 0; iter < 15; iter++) {
-      const curInstant = Instant.fromEpochNanoseconds(curNs);
-      const coords = computeSolarCoordinates(curInstant, place);
-      const errorDeg = coords.geometricElevationDeg - targetElevationDeg;
-      if (Math.abs(errorDeg) < 1e-5) {
+    for (let iter = 0; iter < 50; iter++) {
+      if (Math.abs(fB) < 1e-6 || (b > a ? b - a : a - b) <= 1_000_000n) {
         break;
       }
-      const dElevDt = dElevPerDay / 86400.0;
-      const rawCorrectionSec = -errorDeg / dElevDt;
-      const correctionSec = Math.max(-43200, Math.min(43200, rawCorrectionSec));
-      curNs += BigInt(Math.round(correctionSec * 1_000_000_000));
+
+      let s: bigint;
+      if (Math.abs(fA - fc) > 1e-9 && Math.abs(fB - fc) > 1e-9) {
+        // Inverse quadratic interpolation
+        const termA = Number(a) * (fB * fc) / ((fA - fB) * (fA - fc));
+        const termB = Number(b) * (fA * fc) / ((fB - fA) * (fB - fc));
+        const termC = Number(c) * (fA * fB) / ((fc - fA) * (fc - fB));
+        s = BigInt(Math.round(termA + termB + termC));
+      } else {
+        // Secant method
+        const sNum = Number(b) - fB * Number(b - a) / (fB - fA);
+        s = BigInt(Math.round(sNum));
+      }
+
+      // Check conditions for bisection safeguard
+      const minBound = (3n * a + b) / 4n;
+      const condition1 = (minBound < b && (s < minBound || s > b)) || (minBound > b && (s > minBound || s < b));
+      const bMinusC = b > c ? b - c : c - b;
+      const bMinusS = b > s ? b - s : s - b;
+      const cMinusD = c > d ? c - d : d - c;
+      const condition2 = mflag && (bMinusS >= bMinusC / 2n);
+      const condition3 = !mflag && (bMinusS >= cMinusD / 2n);
+      const condition4 = mflag && (bMinusC < 1_000_000n);
+      const condition5 = !mflag && (cMinusD < 1_000_000n);
+
+      if (condition1 || condition2 || condition3 || condition4 || condition5) {
+        s = (a + b) / 2n;
+        mflag = true;
+      } else {
+        mflag = false;
+      }
+
+      const fs = computeSolarCoordinates(Instant.fromEpochNanoseconds(s), place).geometricElevationDeg - targetElevationDeg;
+      d = c;
+      c = b;
+      fc = fB;
+
+      if (fA * fs < 0) {
+        b = s;
+        fB = fs;
+      } else {
+        a = s;
+        fA = fs;
+      }
+
+      if (Math.abs(fA) < Math.abs(fB)) {
+        const temp = a;
+        a = b;
+        b = temp;
+        const tempF = fA;
+        fA = fB;
+        fB = tempF;
+      }
     }
 
-    const candidate = Instant.fromEpochNanoseconds(curNs);
-    const checkCoords = computeSolarCoordinates(candidate, place);
-    if (Math.abs(checkCoords.geometricElevationDeg - targetElevationDeg) <= 0.005) {
+    const candidate = Instant.fromEpochNanoseconds(b);
+    const finalResidual = Math.abs(
+      computeSolarCoordinates(candidate, place).geometricElevationDeg - targetElevationDeg
+    );
+
+    // Explicit residual verification: |h(t) - theta| < 1e-5°
+    if (finalResidual < 1e-5) {
       return candidate;
     }
     return null;
   }
+
 
   // Non-polar: define exact 12-hour search bracket for this diurnal branch
   // Rising branch: [noon - 12h, noon]

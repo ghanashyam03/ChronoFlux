@@ -30,7 +30,9 @@ describe('Astronomical Solar Model — Polar Edge Cases', () => {
       expect(Number.isNaN(state.elevationDeg)).toBe(false);
       expect(state.isPolarNight).toBe(true);
       expect(state.isPolarDay).toBe(false);
-      expect(state.phase).toBe('polar_night');
+      expect(state.polarRegime).toBe('polar_night');
+      // At noon in Tromsø on winter solstice, elevation is -3.09° (civil twilight)
+      expect(state.phase).toBe('civil_twilight');
       expect(state.isDirectSunlight).toBe(false);
       expect(state.sunrise).toBeNull();
       expect(state.sunset).toBeNull();
@@ -47,8 +49,10 @@ describe('Astronomical Solar Model — Polar Edge Cases', () => {
 
         expect(state.elevationDeg).toBeLessThan(-0.833);
         expect(state.isPolarNight).toBe(true);
-        expect(state.phase).toBe('polar_night');
+        expect(state.polarRegime).toBe('polar_night');
+        expect(['civil_twilight', 'nautical_twilight', 'astronomical_twilight', 'night']).toContain(state.phase);
       }
+
     });
 
     it('returns null for nextSunrise over a 24-hour search limit without throwing', () => {
@@ -104,7 +108,8 @@ describe('Astronomical Solar Model — Polar Edge Cases', () => {
       expect(Number.isNaN(state.elevationDeg)).toBe(false);
       expect(state.isPolarDay).toBe(true);
       expect(state.isPolarNight).toBe(false);
-      expect(state.phase).toBe('polar_day');
+      expect(state.polarRegime).toBe('polar_day');
+      expect(state.phase).toBe('day');
       expect(state.isDirectSunlight).toBe(true);
       expect(state.sunrise).toBeNull();
       expect(state.sunset).toBeNull();
@@ -122,9 +127,11 @@ describe('Astronomical Solar Model — Polar Edge Cases', () => {
         // At 78°N in June, elevation never drops below +11°
         expect(state.elevationDeg).toBeGreaterThan(11.0);
         expect(state.isPolarDay).toBe(true);
-        expect(state.phase).toBe('polar_day');
+        expect(state.polarRegime).toBe('polar_day');
+        expect(state.phase).toBe('day');
         expect(state.isDirectSunlight).toBe(true);
       }
+
     });
 
     it('returns null for nextSunset over a 24-hour search limit in Midnight Sun', () => {
