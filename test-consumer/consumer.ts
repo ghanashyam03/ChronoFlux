@@ -35,6 +35,17 @@ import type {
   TimeUnit,
   ResolveOptions,
   SelectionPolicy,
+  InstantJSON,
+  DurationJSON,
+  PlaceJSON,
+  IntervalJSON,
+  IntervalSetJSON,
+  InstantParseOptions,
+  LeapSecondPolicy,
+  SolarEventName,
+  SolarEventInstant,
+  SolarTransitionInstant,
+  CivilTransitionInfo,
 } from '@chronoflux/core';
 
 console.log('[consumer.ts] Verifying @chronoflux/core TypeScript typings & runtime...');
@@ -54,6 +65,9 @@ const civProp: CivilProperty = 'hour';
 const angUnit: AngleUnit = 'deg';
 const timeUnit: TimeUnit = 'hours';
 const policy: SelectionPolicy = 'earliest';
+const sEventName: SolarEventName = 'sunrise';
+const parseOpts: InstantParseOptions = { leapSecondPolicy: 'compatible' };
+const leapPolicy: LeapSecondPolicy = 'strict';
 
 assert.strictEqual(allenRel, 'overlaps');
 assert.strictEqual(compOp, 'gte');
@@ -63,6 +77,9 @@ assert.strictEqual(civProp, 'hour');
 assert.strictEqual(angUnit, 'deg');
 assert.strictEqual(timeUnit, 'hours');
 assert.strictEqual(policy, 'earliest');
+assert.strictEqual(sEventName, 'sunrise');
+assert.strictEqual(parseOpts.leapSecondPolicy, 'compatible');
+assert.strictEqual(leapPolicy, 'strict');
 
 // 2. Class Instantiation & Operations
 const london = new Place(placeOptions);

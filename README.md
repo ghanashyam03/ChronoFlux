@@ -118,6 +118,36 @@ for (const interval of result.intervals.intervals) {
 
 ---
 
+## API Reference Summary
+
+| Namespace / Class | Method / Property | Description |
+| :--- | :--- | :--- |
+| **`ChronoFlux` (Facade)** | `ChronoFlux.now()` | Captures current physical wall-clock `Instant`. |
+| | `ChronoFlux.instant(source, roundingMode?)` | Constructs `Instant` from `bigint`, `number`, `Date`, or ISO string. |
+| | `ChronoFlux.duration.<unit>(n, roundingMode?)` | Factory for `Duration` in nanoseconds, microseconds, milliseconds, seconds, minutes, hours, days. |
+| | `ChronoFlux.place({ latitude, longitude, ... })` | Constructs immutable observer `Place` on WGS84 geoid. |
+| | `ChronoFlux.interval(start, end)` | Constructs half-open `Interval` $[t_{\text{start}}, t_{\text{end}})$. |
+| | `ChronoFlux.intervalSet.from(intervals)` | Canonical sorted, disjoint, merged `IntervalSet`. |
+| | `ChronoFlux.solar.evaluatePosition(t, place)` | Instantaneous solar elevation, azimuth, and zenith ($\approx 8\text{ }\mu\text{s/op}$). |
+| | `ChronoFlux.solar.evaluate(t, place)` | Full diurnal solar state, twilights, noon, midnight, and polar regimes. |
+| | `ChronoFlux.solar.nextEvent({ event, place, after })` | Bracketed Brent-Dekker solver for sunrise, sunset, and twilights. |
+| | `ChronoFlux.solar.findTransitions(place, window, deg)` | Finds all elevation threshold crossing boundary instants. |
+| | `ChronoFlux.civil.evaluate(t, placeOrTz)` | Evaluates local calendar date, time, offset, and DST status. |
+| | `ChronoFlux.civil.resolve(civilDateTimeInput)` | Resolves wall-clock date/time to `Instant` with DST disambiguation. |
+| | `ChronoFlux.conditions` (`Conditions`) | Fluent declarative Condition AST builder. |
+| | `ChronoFlux.resolve({ place, within, where, ... })` | Resolves condition AST into continuous intervals with `ResolutionReport`. |
+| **`Conditions` (Builder)** | `Conditions.solar.elevation.gte(deg)` | Solar elevation angle comparison predicate. |
+| | `Conditions.solar.azimuth.between(min, max)` | Solar azimuth angle comparison predicate ($[0^\circ, 360^\circ)$). |
+| | `Conditions.solar.phase.eq(phase)` | Categorical twilight phase predicate (`'day'`, `'night'`, etc.). |
+| | `Conditions.solar.polarRegime.eq(regime)` | Polar regime predicate (`'polar_day'`, `'polar_night'`, `'none'`). |
+| | `Conditions.civil.hour.between(start, end)` | Civil wall-clock hour range predicate (half-open $[start, end)$). |
+| | `Conditions.civil.dayOfWeek.between(start, end)` | Discrete civil day-of-week predicate ($1 = \text{Mon} .. 7 = \text{Sun}$). |
+| | `Conditions.and(...operands)` | Logical conjunction (algebraic intersection $\cap$). |
+| | `Conditions.or(...operands)` | Logical disjunction (algebraic union $\cup$). |
+| | `Conditions.not(operand)` | Logical negation (search window complement $W \setminus S$). |
+
+---
+
 ## Documentation Index
 
 Explore the comprehensive guides in the [`docs/`](docs/) directory:

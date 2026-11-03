@@ -18,36 +18,69 @@ import {
   validateConditionAST,
 } from './ast.js';
 
+/**
+ * Fluent builder for solar angle properties (elevation, azimuth, zenith).
+ */
 export interface SolarAngleBuilder {
+  /** Strictly greater than (> val). */
   gt(val: number, unit?: AngleUnit): SolarComparisonNode;
+  /** Greater than or equal to (>= val). */
   gte(val: number, unit?: AngleUnit): SolarComparisonNode;
+  /** Strictly less than (< val). */
   lt(val: number, unit?: AngleUnit): SolarComparisonNode;
+  /** Less than or equal to (<= val). */
   lte(val: number, unit?: AngleUnit): SolarComparisonNode;
+  /** Exact equality (== val). Note: Continuous measure-zero points evaluate to empty set. */
   eq(val: number, unit?: AngleUnit): SolarComparisonNode;
+  /** Inequality (!= val). Evaluates to full window complement. */
   neq(val: number, unit?: AngleUnit): SolarComparisonNode;
+  /** Half-open continuous range between min and max (inclusive min, exclusive max: [min, max)). */
   between(min: number, max: number, unit?: AngleUnit): SolarComparisonNode;
+  /** Set membership: matches any angle in vals. */
   in(vals: readonly number[], unit?: AngleUnit): SolarComparisonNode;
 }
 
+/**
+ * Fluent builder for categorical properties (phase, polarRegime).
+ */
 export interface CategoricalBuilder<T extends string> {
+  /** Matches exact categorical value. */
   eq(val: T): SolarComparisonNode;
+  /** Matches any categorical value other than val. */
   neq(val: T): SolarComparisonNode;
+  /** Matches any of the specified categorical values. */
   in(vals: readonly T[]): SolarComparisonNode;
 }
 
+/**
+ * Fluent builder for boolean properties (isDirectSunlight, isDaylightSaving).
+ */
 export interface BooleanBuilder<D extends 'solar' | 'civil'> {
+  /** Matches specified boolean value. */
   eq(val: boolean): D extends 'solar' ? SolarComparisonNode : CivilComparisonNode;
+  /** Matches opposite boolean value. */
   neq(val: boolean): D extends 'solar' ? SolarComparisonNode : CivilComparisonNode;
 }
 
+/**
+ * Fluent builder for discrete civil properties (hour, minute, second, dayOfWeek, day, month, year).
+ */
 export interface CivilNumericBuilder {
+  /** Strictly greater than (> val). */
   gt(val: number, unit?: TimeUnit): CivilComparisonNode;
+  /** Greater than or equal to (>= val). */
   gte(val: number, unit?: TimeUnit): CivilComparisonNode;
+  /** Strictly less than (< val). */
   lt(val: number, unit?: TimeUnit): CivilComparisonNode;
+  /** Less than or equal to (<= val). */
   lte(val: number, unit?: TimeUnit): CivilComparisonNode;
+  /** Exact integer equality (== val). */
   eq(val: number, unit?: TimeUnit): CivilComparisonNode;
+  /** Inequality (!= val). */
   neq(val: number, unit?: TimeUnit): CivilComparisonNode;
+  /** Half-open range [min, max). For hours: between(9, 17) corresponds to 09:00 to 17:00. */
   between(min: number, max: number, unit?: TimeUnit): CivilComparisonNode;
+  /** Discrete set membership: matches any integer in vals. */
   in(vals: readonly number[], unit?: TimeUnit): CivilComparisonNode;
 }
 

@@ -81,7 +81,7 @@ node quickstart.mjs
 | **Half-Open Interval** | `ChronoFlux.interval(start, end)` | Continuous $[t_{\text{start}}, t_{\text{end}})$ range |
 | **Interval Sets** | `ChronoFlux.intervalSet.from(intervals)` | Canonical sorted, disjoint, merged interval collection |
 | **Solar Position** | `ChronoFlux.solar.evaluatePosition(instant, place)` | Instantaneous elevation, azimuth, zenith (< 8 µs/op) |
-| **Solar Events** | `ChronoFlux.solar.nextEvent({ type, place, after })` | High-precision Brent-Dekker solver for sunrise, sunset, twilights |
+| **Solar Events** | `ChronoFlux.solar.nextEvent({ event, place, after })` | High-precision Brent-Dekker solver for sunrise, sunset, twilights |
 | **Civil Wall Clock** | `ChronoFlux.civil.evaluate(instant, place)` | Wall-clock date, hour, minute, second, UTC offset, and DST status |
 | **DST Disambiguation**| `ChronoFlux.civil.resolve({ ... })` | Resolves wall-clock times across fall-back repeated hours and spring-forward gaps |
 | **Condition Builder** | `ChronoFlux.conditions` (`Conditions`) | Fluent, JSON-serializable temporal predicate AST builder |

@@ -67,7 +67,7 @@ import { ChronoFlux } from '@chronoflux/core';
 const place = ChronoFlux.place({ latitude: 37.7749, longitude: -122.4194 });
 
 const nextSunrise = ChronoFlux.solar.nextEvent({
-  type: 'sunrise',
+  event: 'sunrise',
   place,
   after: ChronoFlux.now(),
 });

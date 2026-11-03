@@ -18,12 +18,21 @@ import { SelectionPolicy } from './intent.js';
 import { CivilBoundaryProvenance, getEffectiveTimeZoneId } from './solver-civil.js';
 import { SolarBoundaryProvenance } from './solver-solar.js';
 
+/**
+ * Granular provenance explanation for a single interval boundary (start or end).
+ */
 export interface BoundaryExplanation {
+  /** Physical or civil Instant at which this boundary occurs */
   readonly instant: Instant;
+  /** Whether this boundary represents the opening ('start') or closing ('end') of an interval */
   readonly boundaryType: 'start' | 'end';
+  /** Human-readable explanation describing the physical crossing, civil event, or window clamp */
   readonly reason: string;
+  /** Domain model governing this boundary: 'solar', 'civil', or 'window' (bounding search interval) */
   readonly model: 'solar' | 'civil' | 'window';
+  /** Declarative condition AST clause that governed this boundary */
   readonly conditionDescription: string;
+  /** Quantitative residuals, tolerances, and metadata */
   readonly details?: {
     readonly property?: string;
     readonly threshold?: number | string | boolean;
@@ -37,23 +46,44 @@ export interface BoundaryExplanation {
   };
 }
 
+/**
+ * Granular explanation for an entire resolved interval, linking start and end boundaries.
+ */
 export interface IntervalExplanation {
+  /** The continuous half-open interval [start, end) represented by this explanation */
   readonly interval: Interval;
+  /** Granular mathematical provenance for the opening boundary (start) */
   readonly startExplanation: BoundaryExplanation;
+  /** Granular mathematical provenance for the closing boundary (end) */
   readonly endExplanation: BoundaryExplanation;
+  /** Total elapsed duration of this interval */
   readonly duration: Duration;
 }
 
+/**
+ * Mathematical provenance and execution report returned by ChronoFlux.resolve().
+ * Details governing conditions, physical crossing residuals, models consulted, and performance.
+ */
 export interface ResolutionReport {
+  /** Human-readable string representation of the resolved Condition AST query */
   readonly query: string;
+  /** Bounding search window within which the condition was resolved */
   readonly searchWindow: Interval;
+  /** Geographic observer place on the WGS84 ellipsoid */
   readonly place: Place;
+  /** Selection intent policy applied ('all', 'earliest', 'latest', 'longest') */
   readonly policy: SelectionPolicy;
+  /** Minimum duration filter constraint applied, if any */
   readonly minDuration?: Duration | undefined;
+  /** List of model domains consulted during evaluation ('solar', 'civil') */
   readonly modelsConsulted: readonly ModelDomain[];
+  /** Detailed boundary-by-boundary explanations for every matching interval */
   readonly explanations: readonly IntervalExplanation[];
+  /** Total count of matching intervals before policy filtering */
   readonly totalMatchesFound: number;
+  /** Execution runtime of the resolver in milliseconds */
   readonly executionTimeMs: number;
+  /** Numerical accuracy bounds, validity range, and timezone metadata */
   readonly accuracy: {
     readonly solarNumericalToleranceDeg?: number;
     readonly isWithinValidityRange?: boolean;

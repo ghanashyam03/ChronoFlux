@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -35,6 +36,17 @@ import type {
   CivilProperty,
   AngleUnit,
   TimeUnit,
+  InstantJSON,
+  DurationJSON,
+  PlaceJSON,
+  IntervalJSON,
+  IntervalSetJSON,
+  InstantParseOptions,
+  LeapSecondPolicy,
+  SolarEventName,
+  SolarEventInstant,
+  SolarTransitionInstant,
+  CivilTransitionInfo,
 } from '../src/index.js';
 
 describe('Phase 4 — Developer SDK, Packaging, and Semantic Correctness', () => {
@@ -72,6 +84,17 @@ describe('Phase 4 — Developer SDK, Packaging, and Semantic Correctness', () =>
       expect(() => Conditions.civil.month.eq(6.5)).toThrow(TypeError);
       expect(() => Conditions.civil.month.between(1.5, 6)).toThrow(TypeError);
       expect(() => Conditions.civil.year.eq(2026.5)).toThrow(TypeError);
+    });
+
+    it('rejects floating-point values in in arrays for all civil numeric properties', () => {
+      expect(() => Conditions.civil.hour.in([9, 10.5])).toThrow(TypeError);
+      expect(() => Conditions.civil.hour.in([9, 10.5])).toThrow(/requires integer values/);
+      expect(() => Conditions.civil.minute.in([15, 30.5])).toThrow(TypeError);
+      expect(() => Conditions.civil.second.in([0, 30.5])).toThrow(TypeError);
+      expect(() => Conditions.civil.dayOfWeek.in([1, 5.5])).toThrow(TypeError);
+      expect(() => Conditions.civil.day.in([1, 15.5])).toThrow(TypeError);
+      expect(() => Conditions.civil.month.in([1, 6.5])).toThrow(TypeError);
+      expect(() => Conditions.civil.year.in([2026, 2027.5])).toThrow(TypeError);
     });
 
     it('accepts valid integer numbers for all civil numeric properties', () => {
@@ -263,7 +286,15 @@ describe('Phase 4 — Developer SDK, Packaging, and Semantic Correctness', () =>
       expect(typeof ChronoFlux.resolve).toBe('function');
       expect(ChronoFlux.conditions).toBeDefined();
 
-      // Compile-time type check verification
+      // Factory ergonomics verification
+      const original = Instant.fromJSON('2026-06-21T12:00:00.000Z');
+      expect(ChronoFlux.instant(original)).toBe(original);
+
+      const temporalObj = { epochNanoseconds: original.epochNanoseconds };
+      const fromTemporal = ChronoFlux.instant(temporalObj);
+      expect(fromTemporal.equals(original)).toBe(true);
+
+      // Compile-time type check verification for all public root types
       const typeCheck: {
         resResult?: ResolutionResult;
         resReport?: ResolutionReport;
@@ -283,8 +314,55 @@ describe('Phase 4 — Developer SDK, Packaging, and Semantic Correctness', () =>
         civilProp?: CivilProperty;
         angleUnit?: AngleUnit;
         timeUnit?: TimeUnit;
+        instantJson?: InstantJSON;
+        durJson?: DurationJSON;
+        placeJson?: PlaceJSON;
+        intervalJson?: IntervalJSON;
+        intervalSetJson?: IntervalSetJSON;
+        parseOpts?: InstantParseOptions;
+        leapPolicy?: LeapSecondPolicy;
+        solarEvent?: SolarEventName;
+        solarEventInst?: SolarEventInstant;
+        solarTransInst?: SolarTransitionInstant;
+        civilTransInfo?: CivilTransitionInfo;
       } = {};
       expect(typeCheck).toBeDefined();
+    });
+
+    it('verifies package archive tarball integrity and strict files whitelist via npm pack', () => {
+      const output = childProcess.execSync('npm pack --dry-run --ignore-scripts --json', {
+        cwd: rootDir,
+        encoding: 'utf-8',
+        shell: process.platform === 'win32' ? 'cmd.exe' : undefined,
+        timeout: 15000,
+      });
+      const packResult = JSON.parse(output);
+      expect(Array.isArray(packResult)).toBe(true);
+      expect(packResult.length).toBeGreaterThan(0);
+      const tarballInfo = packResult[0];
+      expect(tarballInfo.name).toBe('@chronoflux/core');
+      expect(tarballInfo.version).toBe('0.1.0');
+      expect(tarballInfo.filename).toBe('chronoflux-core-0.1.0.tgz');
+      expect(tarballInfo.files.length).toBeGreaterThan(0);
+
+      // Verify that every single file in the tarball is in dist/, or is README.md, LICENSE, package.json
+      for (const file of tarballInfo.files) {
+        const p: string = file.path;
+        const isWhitelisted =
+          p.startsWith('dist/') ||
+          p === 'README.md' ||
+          p === 'LICENSE' ||
+          p === 'package.json';
+        expect(isWhitelisted).toBe(true);
+
+        // Explicitly assert zero source, tests, or config files leaked into tarball
+        expect(p.startsWith('src/')).toBe(false);
+        expect(p.startsWith('tests/')).toBe(false);
+        expect(p.startsWith('test-consumer/')).toBe(false);
+        expect(p.startsWith('.github/')).toBe(false);
+        expect(p.endsWith('tsconfig.json')).toBe(false);
+        expect(p.endsWith('vitest.config.ts')).toBe(false);
+      }
     });
   });
 });

@@ -48,6 +48,13 @@ export type {
   AllenRelation,
   DurationFields,
   PlaceOptions,
+  InstantJSON,
+  DurationJSON,
+  PlaceJSON,
+  IntervalJSON,
+  IntervalSetJSON,
+  InstantParseOptions,
+  LeapSecondPolicy,
 
   // Astronomical Solar Model
   SolarState,
@@ -56,6 +63,9 @@ export type {
   CrossingCondition,
   SolarUncertaintyDetails,
   SolarEventOptions,
+  SolarEventName,
+  SolarEventInstant,
+  SolarTransitionInstant,
   InstantaneousSolarPosition,
   AstronomicalTimeScale,
   AstronomicalTimeScaleOptions,
@@ -68,6 +78,7 @@ export type {
   DisambiguationPolicy,
   DstDisambiguation,
   DstConfidence,
+  CivilTransitionInfo,
 
   // Temporal Conditions & Resolver
   ConditionAST,
@@ -102,9 +113,23 @@ export const ChronoFlux = Object.freeze({
   },
 
   /**
-   * Constructs an Instant from nanoseconds, milliseconds, Date, or ISO string.
+   * Constructs an Instant from nanoseconds, milliseconds, Date, ISO string, or another Instant.
    */
-  instant(source: bigint | number | Date | string, roundingMode?: RoundingMode): Instant {
+  instant(
+    source: bigint | number | Date | string | Instant | { readonly epochNanoseconds: bigint },
+    roundingMode?: RoundingMode
+  ): Instant {
+    if (source instanceof Instant) {
+      return source;
+    }
+    if (
+      typeof source === 'object' &&
+      source !== null &&
+      'epochNanoseconds' in source &&
+      typeof (source as { epochNanoseconds: unknown }).epochNanoseconds === 'bigint'
+    ) {
+      return new Instant((source as { epochNanoseconds: bigint }).epochNanoseconds);
+    }
     if (typeof source === 'bigint') {
       return Instant.fromEpochNanoseconds(source, roundingMode);
     }
@@ -171,12 +196,21 @@ export const ChronoFlux = Object.freeze({
    * IntervalSet factory methods.
    */
   intervalSet: Object.freeze({
+    /**
+     * Constructs an empty IntervalSet containing 0 intervals.
+     */
     empty(): IntervalSet {
       return IntervalSet.empty();
     },
+    /**
+     * Constructs a canonical IntervalSet from an iterable collection of Interval objects.
+     */
     from(intervals: Iterable<Interval>): IntervalSet {
       return IntervalSet.from(intervals);
     },
+    /**
+     * Constructs a canonical IntervalSet from variable Interval arguments.
+     */
     of(...intervals: Interval[]): IntervalSet {
       return IntervalSet.from(intervals);
     },
