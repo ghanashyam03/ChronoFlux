@@ -10,11 +10,15 @@ import { Place } from '../../primitives/place.js';
  * Solar illumination and twilight regimes based strictly on instantaneous geometric solar elevation.
  *
  * Astronomical Conventions (Harmonized to Geometric Solar Elevation h_geom):
- * - 'day': Direct sunlight, geometric elevation h_geom >= -0.8333° (apparent upper limb above horizon)
- * - 'civil_twilight': [-6.0°, -0.8333°)
- * - 'nautical_twilight': [-12.0°, -6.0°)
- * - 'astronomical_twilight': [-18.0°, -12.0°)
- * - 'night': < -18.0°
+ * - 'day': Direct sunlight, geometric elevation h_geom >= -0.8333° - d_dip (apparent upper limb above horizon)
+ * - 'civil_twilight': [-6.0° - d_dip, -0.8333° - d_dip)
+ * - 'nautical_twilight': [-12.0° - d_dip, -6.0° - d_dip)
+ * - 'astronomical_twilight': [-18.0° - d_dip, -12.0° - d_dip)
+ * - 'night': < -18.0° - d_dip
+ *
+ * Elevation Horizon Dip:
+ * When observer orthometric elevation > 0m, the effective horizon threshold is depressed by
+ * d_dip = (1.76 / 60) * sqrt(elevationMeters) degrees. For sea level (elevationMeters = 0 or undefined), d_dip = 0.
  */
 export type SolarPhase =
   | 'day'
@@ -25,6 +29,7 @@ export type SolarPhase =
 
 /**
  * Diurnal polar regime tracking whether the location experiences midnight sun, polar night, or normal diurnal cycle.
+ * Evaluated relative to the elevation-adjusted horizon dip threshold theta_eff = -0.8333° - d_dip.
  * Evaluated independently from instantaneous solar illumination phase.
  */
 export type PolarRegimeType = 'none' | 'polar_day' | 'polar_night';
@@ -142,7 +147,8 @@ export interface InstantaneousSolarPosition {
   readonly zenithDeg: number;
 
   /**
-   * Current solar phase or twilight classification based on geometric solar elevation.
+   * Current solar phase or twilight classification based on geometric solar elevation,
+   * adjusted for observer orthometric elevation horizon dip (-0.8333° - d_dip).
    */
   readonly phase: SolarPhase;
 
@@ -152,12 +158,13 @@ export interface InstantaneousSolarPosition {
   readonly isWithinValidityRange: boolean;
 
   /**
-   * True if accuracy guarantees (±0.01°) are degraded because the instant lies outside the model's verified range.
+   * True if accuracy is degraded because the instant lies outside the model's verified 1800-2100 CE range
+   * (assumed numerical error ±0.01°, empirical accuracy < 0.02°).
    */
   readonly isAccuracyDegraded: boolean;
 
   /**
-   * Whether direct sunlight is present (geometricElevationDeg >= -0.8333°).
+   * Whether direct sunlight is present (geometricElevationDeg >= -0.8333° - d_dip).
    */
   readonly isDirectSunlight: boolean;
 
@@ -238,17 +245,19 @@ export interface SolarState {
   readonly zenithDeg: number;
 
   /**
-   * Current solar phase or twilight classification based on geometric solar elevation.
+   * Current solar phase or twilight classification based on geometric solar elevation,
+   * adjusted for observer orthometric elevation horizon dip (-0.8333° - d_dip).
    */
   readonly phase: SolarPhase;
 
   /**
-   * Whether direct sunlight is present (geometricElevationDeg >= -0.8333°).
+   * Whether direct sunlight is present (geometricElevationDeg >= -0.8333° - d_dip).
    */
   readonly isDirectSunlight: boolean;
 
   /**
-   * Independent polar regime classification for this diurnal cycle ('none' | 'polar_day' | 'polar_night').
+   * Independent polar regime classification for this diurnal cycle ('none' | 'polar_day' | 'polar_night'),
+   * evaluated relative to the elevation-adjusted threshold theta_eff = -0.8333° - d_dip.
    */
   readonly polarRegime: PolarRegimeType;
 
@@ -268,7 +277,8 @@ export interface SolarState {
   readonly isWithinValidityRange: boolean;
 
   /**
-   * True if accuracy guarantees (±0.01°) are degraded because the instant lies outside the model's verified range.
+   * True if accuracy is degraded because the instant lies outside the model's verified 1800-2100 CE range
+   * (assumed numerical error ±0.01°, empirical accuracy < 0.02°).
    */
   readonly isAccuracyDegraded: boolean;
 
@@ -409,8 +419,11 @@ export class SolarEventInstant extends Instant {
     this.isWithinValidityRange = metadata.isWithinValidityRange;
     this.isAccuracyDegraded = metadata.isAccuracyDegraded;
     this.uncertaintyDeg = metadata.uncertaintyDeg;
-    this.uncertaintyMinutes = metadata.uncertaintyMinutes;
     this.uncertainty = metadata.uncertainty;
+    this.uncertaintyMinutes =
+      metadata.uncertainty !== undefined
+        ? metadata.uncertainty.eventTimeUncertaintyMinutes
+        : metadata.uncertaintyMinutes;
     this.crossingCondition = metadata.crossingCondition ?? metadata.uncertainty.crossingCondition;
     Object.freeze(this);
   }
@@ -450,8 +463,11 @@ export class SolarTransitionInstant extends Instant {
     this.isWithinValidityRange = metadata.isWithinValidityRange;
     this.isAccuracyDegraded = metadata.isAccuracyDegraded;
     this.uncertaintyDeg = metadata.uncertaintyDeg;
-    this.uncertaintyMinutes = metadata.uncertaintyMinutes;
     this.uncertainty = metadata.uncertainty;
+    this.uncertaintyMinutes =
+      metadata.uncertainty !== undefined
+        ? metadata.uncertainty.eventTimeUncertaintyMinutes
+        : metadata.uncertaintyMinutes;
     this.crossingCondition = metadata.crossingCondition ?? metadata.uncertainty.crossingCondition;
     Object.freeze(this);
   }

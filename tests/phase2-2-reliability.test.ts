@@ -520,9 +520,13 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       // 2. Calculated atmospheric refraction uncertainty (~12% of refraction)
       expect(unc.atmosphericRefractionUncertaintyDeg).toBeGreaterThan(0.0);
 
-      // 3. Combined root-sum-square angular error Δh(t)
+      // 3. Combined root-sum-square angular error Δh(t) including time-scale provider uncertainty
       expect(unc.combinedCoordinateUncertaintyDeg).toBeCloseTo(
-        Math.sqrt(unc.numericalErrorDeg ** 2 + unc.atmosphericRefractionUncertaintyDeg ** 2),
+        Math.sqrt(
+          unc.numericalErrorDeg ** 2 +
+            unc.atmosphericRefractionUncertaintyDeg ** 2 +
+            unc.timeScaleUncertaintyDeg ** 2
+        ),
         6
       );
 
@@ -630,6 +634,26 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       expect(svalbardSunrise!.uncertaintyMinutes).toBeLessThan(5.0);
       expect(svalbardSunrise!.uncertaintyMinutes).toBe(svalbardSunrise!.uncertainty.eventTimeUncertaintyMinutes);
       expect(svalbardSunrise!.crossingCondition).toBe('well_conditioned');
+
+      // 7. Alert, Nunavut (82.50°N) near-polar vernal sunrise
+      const alert = ChronoFlux.place({ latitude: 82.5018, longitude: -62.3481 });
+      const alertSunrise = ChronoFlux.solar.nextEvent({
+        event: 'sunrise',
+        place: alert,
+        after: ChronoFlux.instant('2026-03-01T00:00:00Z'),
+      });
+      expect(alertSunrise).not.toBeNull();
+      expect(alertSunrise!.uncertaintyMinutes).toBeGreaterThan(1.0);
+      expect(alertSunrise!.uncertaintyMinutes).toBeLessThan(100.0);
+      expect(alertSunrise!.uncertaintyMinutes).toBe(alertSunrise!.uncertainty.eventTimeUncertaintyMinutes);
+      expect(alertSunrise!.crossingCondition).toBe('well_conditioned');
+
+      // 8. Near-polar equinox position evaluation at 85°N: verifies seasonal derivative in calcSolarUncertainty
+      const nearPolar85N = ChronoFlux.place({ latitude: 85.0, longitude: 0.0 });
+      const equinoxNoon = ChronoFlux.instant('2026-03-20T12:00:00Z');
+      const state85N = ChronoFlux.solar.evaluate(equinoxNoon, nearPolar85N);
+      expect(state85N.uncertainty.crossingSensitivityDegPerMin).toBeGreaterThan(0.0002);
+      expect(state85N.uncertainty.crossingCondition).toBe('well_conditioned');
     });
 
     it('enforces exact nested equality: SolarEventInstant.uncertaintyMinutes === uncertainty.eventTimeUncertaintyMinutes across all event types', () => {
@@ -1044,6 +1068,43 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       expect(() => ChronoFlux.solar.validateAstronomicalTimeScale(provider, testInstant)).not.toThrow();
     });
 
+    it('handles BaseAstronomicalTimeScale subclasses implementing only getDeltaT without getDut1 recursion', () => {
+      class PureDeltaTProvider extends BaseAstronomicalTimeScale {
+        readonly metadata = undefined;
+        getDeltaT(_instant: Instant): number {
+          return 69.184;
+        }
+      }
+
+      const provider = new PureDeltaTProvider();
+      const testInstant = ChronoFlux.instant('2026-06-21T12:00:00Z');
+      const jdUt = instantToJulianDay(testInstant);
+
+      // Must not recurse or throw stack overflow
+      expect(provider.getDut1(testInstant)).toBe(0.0);
+      expect(provider.getDut1Seconds(testInstant)).toBe(0.0);
+      expect(provider.toUt1JulianDay(testInstant)).toBeCloseTo(jdUt, 8);
+      expect(provider.toTerrestrialJulianDay(testInstant)).toBeCloseTo(jdUt + 69.184 / 86400.0, 8);
+      expect(() => validateAstronomicalTimeScale(provider, testInstant)).not.toThrow();
+
+      // Subclass overriding only getDut1Seconds
+      class SecondsOnlyProvider extends BaseAstronomicalTimeScale {
+        readonly metadata = undefined;
+        getDeltaT(_instant: Instant): number {
+          return 70.0;
+        }
+        override getDut1Seconds(_instant: Instant): number {
+          return -0.35;
+        }
+      }
+
+      const secondsProvider = new SecondsOnlyProvider();
+      expect(secondsProvider.getDut1(testInstant)).toBe(-0.35);
+      expect(secondsProvider.getDut1Seconds(testInstant)).toBe(-0.35);
+      expect(secondsProvider.toUt1JulianDay(testInstant)).toBeCloseTo(jdUt - 0.35 / 86400.0, 8);
+      expect(() => validateAstronomicalTimeScale(secondsProvider, testInstant)).not.toThrow();
+    });
+
     it('validates provider self-consistency and rejects contradictory conversions with RangeError', () => {
       const testInstant = ChronoFlux.instant('2026-06-21T12:00:00Z');
       const jdUt = instantToJulianDay(testInstant);
@@ -1057,6 +1118,16 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
         toTerrestrialJulianCentury: () => (jdUt + 70.5 / 86400.0 - 2451545.0) / 36525.0,
       };
       expect(() => validateAstronomicalTimeScale(badUt1Provider, testInstant)).toThrow(RangeError);
+
+      // 1b. Subtle 1-second discrepancy on UT1 (~1.157e-5 days) must be rejected under strict 1e-7 tolerance
+      const subtleBadUt1Provider: AstronomicalTimeScale = {
+        getDeltaT: () => 70.0,
+        getDut1: () => 0.0,
+        toUt1JulianDay: () => jdUt + 1.0 / 86400.0, // 1 second offset contradicts getDut1 = 0
+        toTerrestrialJulianDay: () => jdUt + 70.0 / 86400.0,
+        toTerrestrialJulianCentury: () => (jdUt + 70.0 / 86400.0 - 2451545.0) / 36525.0,
+      };
+      expect(() => validateAstronomicalTimeScale(subtleBadUt1Provider, testInstant)).toThrow(RangeError);
 
       // 2. Contradictory Terrestrial Time Julian Day
       const badTtProvider: AstronomicalTimeScale = {
@@ -1125,6 +1196,19 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
         expect(customState.uncertainty.timeScaleUncertaintyDeg).toBeCloseTo(0.0375, 3);
         expect(customState.uncertainty.timeScaleUncertaintyDeg).toBeGreaterThan(
           state.uncertainty.timeScaleUncertaintyDeg
+        );
+
+        // Combined coordinate uncertainty must reflect provider uncertainty
+        expect(customState.uncertainty.combinedCoordinateUncertaintyDeg).toBeGreaterThan(
+          state.uncertainty.combinedCoordinateUncertaintyDeg
+        );
+
+        // Event-crossing uncertainty must propagate provider uncertainty
+        expect(customState.sunrise!.uncertaintyMinutes).toBeGreaterThan(
+          state.sunrise!.uncertaintyMinutes
+        );
+        expect(customState.uncertainty.eventTimeUncertaintyMinutes).toBeGreaterThan(
+          state.uncertainty.eventTimeUncertaintyMinutes
         );
       } finally {
         ChronoFlux.solar.registerAstronomicalTimeScale(null);

@@ -36,7 +36,8 @@ export const SOLAR_MODEL_METADATA: ModelMetadata = Object.freeze({
   version: '1.0.0',
   accuracy: Object.freeze({
     timeResolution: Duration.fromMilliseconds(1),
-    marginOfError: '±0.01° for 1800-2100 CE; dynamic event-time uncertainty Delta t = Delta h / |dh/dt|',
+    marginOfError:
+      'Assumed numerical error ±0.01° (validated empirical accuracy < 0.02° across 1800-2100 CE); dynamic event-time uncertainty Delta t = Delta h / |dh/dt|',
   }),
   assumptions: Object.freeze([
     'Jean Meeus (Astronomical Algorithms, 2nd ed.) solar positioning formulations',

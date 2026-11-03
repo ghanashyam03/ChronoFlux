@@ -24,6 +24,10 @@ import { PolarRegimeType, SolarPhase } from './types.js';
  */
 export const DIRECT_SUNLIGHT_THRESHOLD_DEG = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG;
 
+/**
+ * Diurnal polar regime tracking whether a location experiences midnight sun, polar night,
+ * or normal diurnal cycle, evaluated against the elevation-adjusted threshold theta_eff = -0.8333° - d_dip.
+ */
 export interface PolarRegime {
   readonly isPolarDay: boolean;
   readonly isPolarNight: boolean;

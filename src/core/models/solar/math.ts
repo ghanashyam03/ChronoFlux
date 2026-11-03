@@ -432,14 +432,11 @@ export function calcSolarUncertainty(
 
   const combinedCoordinateUncertaintyDeg = Math.sqrt(
     numericalErrorDeg * numericalErrorDeg +
-      atmosphericRefractionUncertaintyDeg * atmosphericRefractionUncertaintyDeg
-  );
-
-  // Total angular uncertainty combining coordinate and time-scale provider uncertainty
-  const totalUncertaintyDeg = Math.sqrt(
-    combinedCoordinateUncertaintyDeg * combinedCoordinateUncertaintyDeg +
+      atmosphericRefractionUncertaintyDeg * atmosphericRefractionUncertaintyDeg +
       timeScaleUncertaintyDeg * timeScaleUncertaintyDeg
   );
+
+  const totalUncertaintyDeg = combinedCoordinateUncertaintyDeg;
 
   // Diurnal rate of change dh/dt in degrees per second / minute
   const phiRad = degToRad(latitudeDeg);
@@ -451,11 +448,17 @@ export function calcSolarUncertainty(
   );
   let dhDtPerSec = dhDtPerMin / 60.0;
   const omegaSec = degToRad(0.25 / 60.0);
-  let d2hDt2PerSec2 = Math.abs(Math.cos(phiRad) * Math.cos(deltaRad)) * omegaSec * omegaSec;
+  let d2hDt2PerSec2 =
+    radToDeg(Math.abs(Math.cos(phiRad) * Math.cos(deltaRad)) * omegaSec * omegaSec) / cosH;
 
-  // In polar regions (|cos(phi)| < 1e-3) where diurnal rate is degenerate,
-  // evaluate 30-second central difference derivative to capture seasonal declination rate
-  if (Math.abs(Math.cos(phiRad)) < 1e-3 && instant !== undefined && place !== undefined) {
+  // In polar and near-polar regions (|cos(phi)| < 0.40, latitude > 66.4°) or near diurnal stationary points
+  // where diurnal rate is degenerate (dhDtPerMin < 1e-4), evaluate 30-second central difference derivative
+  // to capture seasonal declination rate and full-model motion
+  if (
+    instant !== undefined &&
+    place !== undefined &&
+    (Math.abs(Math.cos(phiRad)) < 0.40 || dhDtPerMin < 1e-4)
+  ) {
     const THIRTY_SEC_NS = 30_000_000_000n;
     const tPlus = Instant.fromEpochNanoseconds(instant.epochNanoseconds + THIRTY_SEC_NS);
     const tMinus = Instant.fromEpochNanoseconds(instant.epochNanoseconds - THIRTY_SEC_NS);
@@ -465,6 +468,20 @@ export function calcSolarUncertainty(
     dhDtPerSec = (hPlus - hMinus) / 60.0;
     dhDtPerMin = Math.abs(hPlus - hMinus);
     d2hDt2PerSec2 = (hPlus - 2 * geometricElevationDeg + hMinus) / 900.0;
+  } else if (instant === undefined || place === undefined) {
+    // Analytical inclusion of seasonal declination drift when instant/place are omitted
+    const epsRad = degToRad(23.44);
+    const sinEps = Math.sin(epsRad);
+    const sinDelta = Math.sin(deltaRad);
+    const cosDelta = Math.max(0.01, Math.cos(deltaRad));
+    const seasonalArg = Math.max(0, sinEps * sinEps - sinDelta * sinDelta);
+    const dDeltaDtPerMin = (Math.sqrt(seasonalArg) / cosDelta) * 0.0006845;
+    const dhDtSeasonalPerMin = Math.abs(
+      ((Math.sin(phiRad) * Math.cos(deltaRad) - Math.cos(phiRad) * Math.sin(deltaRad) * Math.cos(hRad)) / cosH) *
+        dDeltaDtPerMin
+    );
+    dhDtPerMin = Math.sqrt(dhDtPerMin * dhDtPerMin + dhDtSeasonalPerMin * dhDtSeasonalPerMin);
+    dhDtPerSec = dhDtPerMin / 60.0;
   }
 
   const absDhDtSec = Math.abs(dhDtPerSec);

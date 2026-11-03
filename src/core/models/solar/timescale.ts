@@ -140,7 +140,7 @@ export abstract class BaseAstronomicalTimeScale implements AstronomicalTimeScale
   }
 
   getDut1(instant: Instant): number {
-    if (this.getDut1Seconds) {
+    if (this.getDut1Seconds !== BaseAstronomicalTimeScale.prototype.getDut1Seconds) {
       return this.getDut1Seconds(instant);
     }
     return 0.0;
@@ -370,7 +370,7 @@ export function validateAstronomicalTimeScale(
 
   const jdUt1 = provider.toUt1JulianDay(instant);
   const expectedJdUt1 = jdUt + dut1 / 86400.0;
-  if (Math.abs(jdUt1 - expectedJdUt1) > 1e-4) {
+  if (Math.abs(jdUt1 - expectedJdUt1) > 1e-7) {
     throw new RangeError(
       `AstronomicalTimeScale provider is inconsistent: toUt1JulianDay (${jdUt1.toFixed(8)}) contradicts getDut1 (${dut1}s, expected JD_UT1 ${expectedJdUt1.toFixed(8)}).`
     );
@@ -378,7 +378,7 @@ export function validateAstronomicalTimeScale(
 
   const jdTt = provider.toTerrestrialJulianDay(instant);
   const expectedJdTt = jdUt + (deltaT + dut1) / 86400.0;
-  if (Math.abs(jdTt - expectedJdTt) > 1e-4) {
+  if (Math.abs(jdTt - expectedJdTt) > 1e-7) {
     throw new RangeError(
       `AstronomicalTimeScale provider is inconsistent: toTerrestrialJulianDay (${jdTt.toFixed(8)}) contradicts getDeltaT (${deltaT}s) and getDut1 (${dut1}s, expected JD_TT ${expectedJdTt.toFixed(8)}).`
     );
@@ -386,7 +386,7 @@ export function validateAstronomicalTimeScale(
 
   const century = provider.toTerrestrialJulianCentury(instant);
   const expectedCentury = julianDayToJulianCentury(jdTt);
-  if (Math.abs(century - expectedCentury) > 1e-6) {
+  if (Math.abs(century - expectedCentury) > 1e-9) {
     throw new RangeError(
       `AstronomicalTimeScale provider is inconsistent: toTerrestrialJulianCentury (${century.toFixed(8)}) contradicts toTerrestrialJulianDay (${expectedCentury.toFixed(8)}).`
     );
