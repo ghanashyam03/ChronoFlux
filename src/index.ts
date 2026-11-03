@@ -30,6 +30,12 @@ import { Interval } from './core/primitives/interval.js';
 import { IntervalSet } from './core/primitives/interval-set.js';
 import { Place, PlaceOptions } from './core/primitives/place.js';
 import { RoundingMode } from './core/primitives/types.js';
+import {
+  Conditions,
+  resolve,
+  ResolveOptions,
+  ResolutionResult,
+} from './core/resolver/index.js';
 
 export * from './core/index.js';
 
@@ -247,4 +253,17 @@ export const ChronoFlux = Object.freeze({
       model: civilModel as CivilModel,
     });
   })(),
+
+  /**
+   * Fluent temporal condition query builder.
+   */
+  conditions: Conditions,
+
+  /**
+   * Resolves a declarative temporal condition AST into continuous, mathematically verified
+   * half-open interval sets with complete boundary provenance.
+   */
+  resolve(options: ResolveOptions): ResolutionResult {
+    return resolve(options);
+  },
 });

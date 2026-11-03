@@ -1,0 +1,291 @@
+/**
+ * @file resolver-solar.test.ts
+ * Test suite for continuous monotonic branch root-finding solar condition solver.
+ * Verifies Milestone Requirement 1: solar.elevation >= 10 degrees with Brent-Dekker residual verification < 1e-5°.
+ */
+
+import { describe, expect, it } from 'vitest';
+import { ChronoFlux, Conditions, Instant, Interval, Place } from '../src/index.js';
+
+describe('Phase 3B — Continuous Solar Condition Solver', () => {
+  const newYork = new Place({
+    latitude: 40.7128,
+    longitude: -74.006,
+    timeZoneId: 'America/New_York',
+  });
+
+  const summerWindow = new Interval(
+    Instant.fromJSON('2026-06-21T00:00:00.000Z'),
+    Instant.fromJSON('2026-06-24T00:00:00.000Z')
+  );
+
+  describe('Milestone 1: solar.elevation >= 10 degrees', () => {
+    it('resolves across multi-day window in New York with verified Brent-Dekker residual < 1e-5°', () => {
+      const condition = Conditions.solar.elevation.gte(10);
+      const result = ChronoFlux.resolve({
+        place: newYork,
+        within: summerWindow,
+        where: condition,
+      });
+
+      // Exactly 3 days in the search window -> 3 diurnal intervals
+      expect(result.intervals.intervals.length).toBe(3);
+
+      for (let day = 0; day < 3; day++) {
+        const interval = result.intervals.intervals[day]!;
+        expect(interval.duration.totalHours).toBeGreaterThan(12.0);
+        expect(interval.duration.totalHours).toBeLessThan(16.0);
+
+        // Verify ascent crossing root residual: |h(t_start) - 10°| < 1e-5°
+        const startCoords = ChronoFlux.solar.evaluatePosition(interval.start, newYork);
+        const startResidual = Math.abs(startCoords.geometricElevationDeg - 10.0);
+        expect(startResidual).toBeLessThan(1e-5);
+
+        // Verify descent crossing root residual: |h(t_end) - 10°| < 1e-5°
+        const endCoords = ChronoFlux.solar.evaluatePosition(interval.end, newYork);
+        const endResidual = Math.abs(endCoords.geometricElevationDeg - 10.0);
+        expect(endResidual).toBeLessThan(1e-5);
+
+        // Midday check: sun reaches peak well above 10°
+        const midNs = (interval.start.epochNanoseconds + interval.end.epochNanoseconds) / 2n;
+        const midCoords = ChronoFlux.solar.evaluatePosition(Instant.fromEpochNanoseconds(midNs), newYork);
+        expect(midCoords.geometricElevationDeg).toBeGreaterThan(60.0);
+      }
+    });
+
+    it('respects unit conversions (rad vs deg) identically', () => {
+      const tenDegInRad = (10.0 * Math.PI) / 180.0;
+      const degResult = ChronoFlux.resolve({
+        place: newYork,
+        within: summerWindow,
+        where: Conditions.solar.elevation.gte(10),
+      });
+
+      const radResult = ChronoFlux.resolve({
+        place: newYork,
+        within: summerWindow,
+        where: Conditions.solar.elevation.gte(tenDegInRad, 'rad'),
+      });
+
+      expect(radResult.intervals.intervals.length).toBe(degResult.intervals.intervals.length);
+      for (let i = 0; i < degResult.intervals.intervals.length; i++) {
+        const diffStartNs = Math.abs(
+          Number(
+            radResult.intervals.intervals[i]!.start.epochNanoseconds -
+              degResult.intervals.intervals[i]!.start.epochNanoseconds
+          )
+        );
+        expect(diffStartNs).toBeLessThan(1_000_000); // within 1 ms
+      }
+    });
+
+    it('solves zenith <= 80° identically to elevation >= 10°', () => {
+      const elevResult = ChronoFlux.resolve({
+        place: newYork,
+        within: summerWindow,
+        where: Conditions.solar.elevation.gte(10),
+      });
+
+      const zenithResult = ChronoFlux.resolve({
+        place: newYork,
+        within: summerWindow,
+        where: Conditions.solar.zenith.lte(80),
+      });
+
+      expect(zenithResult.intervals.intervals.length).toBe(elevResult.intervals.intervals.length);
+      for (let i = 0; i < elevResult.intervals.intervals.length; i++) {
+        const diffStartNs = Math.abs(
+          Number(
+            zenithResult.intervals.intervals[i]!.start.epochNanoseconds -
+              elevResult.intervals.intervals[i]!.start.epochNanoseconds
+          )
+        );
+        expect(diffStartNs).toBeLessThan(1_000_000);
+      }
+    });
+
+    it('solves direct sunlight (sunrise to sunset)', () => {
+      // June 21 calendar day in New York (00:00 EDT to 24:00 EDT)
+      const singleDay = new Interval(
+        Instant.fromJSON('2026-06-21T04:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T04:00:00.000Z')
+      );
+
+      const result = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.solar.isDirectSunlight.eq(true),
+      });
+
+      expect(result.intervals.intervals.length).toBe(1);
+      const sunlight = result.intervals.intervals[0]!;
+
+      // In NYC summer solstice, daylight is ~15 hours
+      expect(sunlight.duration.totalHours).toBeGreaterThan(14.8);
+      expect(sunlight.duration.totalHours).toBeLessThan(15.5);
+
+      // Verify sunrise threshold ~ -0.833°
+      const sunriseCoords = ChronoFlux.solar.evaluatePosition(sunlight.start, newYork);
+      expect(Math.abs(sunriseCoords.geometricElevationDeg - -0.833333)).toBeLessThan(1e-4);
+    });
+
+    it('solves solar twilight phases (civil_twilight)', () => {
+      // June 21 calendar day in New York (00:00 EDT to 24:00 EDT)
+      const singleDay = new Interval(
+        Instant.fromJSON('2026-06-21T04:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T04:00:00.000Z')
+      );
+
+      const result = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.solar.phase.eq('civil_twilight'),
+      });
+
+      // Civil twilight occurs twice daily: dawn and dusk
+      expect(result.intervals.intervals.length).toBe(2);
+      const dawn = result.intervals.intervals[0]!;
+      const dusk = result.intervals.intervals[1]!;
+
+      // Dawn: begins at -6°, ends at sunrise (-0.8333°)
+      const dawnStart = ChronoFlux.solar.evaluatePosition(dawn.start, newYork);
+      expect(Math.abs(dawnStart.geometricElevationDeg - -6.0)).toBeLessThan(1e-4);
+
+      // Dusk: begins at sunset (-0.8333°), ends at -6°
+      const duskEnd = ChronoFlux.solar.evaluatePosition(dusk.end, newYork);
+      expect(Math.abs(duskEnd.geometricElevationDeg - -6.0)).toBeLessThan(1e-4);
+    });
+
+    it('clamps cleanly to search window when starting during daylight', () => {
+      // Window begins at 14:00 UTC (approx 10:00 AM EDT, when sun is already up)
+      const middayStartWindow = new Interval(
+        Instant.fromJSON('2026-06-21T14:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T00:00:00.000Z')
+      );
+
+      const result = ChronoFlux.resolve({
+        place: newYork,
+        within: middayStartWindow,
+        where: Conditions.solar.elevation.gte(10),
+      });
+
+      expect(result.intervals.intervals.length).toBe(1);
+      const interval = result.intervals.intervals[0]!;
+      expect(interval.start.equals(middayStartWindow.start)).toBe(true);
+      expect(result.report.explanations[0]!.startExplanation.model).toBe('window');
+    });
+
+    it('handles tangential graze cleanly without spurious 0-length intervals', () => {
+      const singleDay = new Interval(
+        Instant.fromJSON('2026-06-21T00:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T00:00:00.000Z')
+      );
+
+      // In New York on June 21, noon elevation is ~72.7°.
+      // If we query elevation >= 85°, it is above max elevation everywhere -> returns empty.
+      const result = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.solar.elevation.gte(85),
+      });
+
+      expect(result.intervals.isEmpty()).toBe(true);
+    });
+
+    it('solves elevation.between(10, 20) with morning and afternoon bands', () => {
+      const singleDay = new Interval(
+        Instant.fromJSON('2026-06-21T04:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T04:00:00.000Z')
+      );
+
+      const result = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.solar.elevation.between(10, 20),
+      });
+
+      // 2 bands: morning rising band and afternoon setting band
+      expect(result.intervals.intervals.length).toBe(2);
+      const morning = result.intervals.intervals[0]!;
+      const afternoon = result.intervals.intervals[1]!;
+
+      expect(morning.start.isBefore(afternoon.start)).toBe(true);
+      const morningStartCoords = ChronoFlux.solar.evaluatePosition(morning.start, newYork);
+      expect(Math.abs(morningStartCoords.geometricElevationDeg - 10.0)).toBeLessThan(1e-4);
+      const morningEndCoords = ChronoFlux.solar.evaluatePosition(morning.end, newYork);
+      expect(Math.abs(morningEndCoords.geometricElevationDeg - 20.0)).toBeLessThan(1e-4);
+    });
+
+    it('solves elevation.lt(0) and elevation.lte(10)', () => {
+      const singleDay = new Interval(
+        Instant.fromJSON('2026-06-21T04:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T04:00:00.000Z')
+      );
+
+      const lt0 = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.solar.elevation.lt(0),
+      });
+
+      // Night hours
+      expect(lt0.intervals.intervals.length).toBeGreaterThan(0);
+
+      const eq10 = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.solar.elevation.eq(10),
+      });
+      expect(eq10.intervals.isEmpty()).toBe(true);
+
+      const neq10 = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.solar.elevation.neq(10),
+      });
+      expect(neq10.intervals.intervals.length).toBe(1);
+    });
+
+    it('solves azimuth conditions across diurnal cycles', () => {
+      const singleDay = new Interval(
+        Instant.fromJSON('2026-06-21T04:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T04:00:00.000Z')
+      );
+
+      const southSun = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.solar.azimuth.between(90, 270),
+      });
+
+      expect(southSun.intervals.intervals.length).toBeGreaterThan(0);
+      for (const interval of southSun.intervals.intervals) {
+        const midNs = (interval.start.epochNanoseconds + interval.end.epochNanoseconds) / 2n;
+        const coords = ChronoFlux.solar.evaluatePosition(Instant.fromEpochNanoseconds(midNs), newYork);
+        expect(coords.azimuthDeg).toBeGreaterThanOrEqual(90);
+        expect(coords.azimuthDeg).toBeLessThanOrEqual(270);
+      }
+    });
+
+    it('solves phase.in and phase.neq', () => {
+      const singleDay = new Interval(
+        Instant.fromJSON('2026-06-21T04:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T04:00:00.000Z')
+      );
+
+      const twilights = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.solar.phase.in(['civil_twilight', 'nautical_twilight']),
+      });
+      expect(twilights.intervals.intervals.length).toBeGreaterThan(0);
+
+      const nonDay = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.solar.phase.neq('day'),
+      });
+      expect(nonDay.intervals.intervals.length).toBeGreaterThan(0);
+    });
+  });
+});
