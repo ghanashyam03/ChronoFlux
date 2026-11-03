@@ -17,6 +17,9 @@ import {
   SolarState,
   SolarEventOptions,
   InstantaneousSolarPosition,
+  AstronomicalTimeScale,
+  getAstronomicalTimeScale,
+  registerAstronomicalTimeScale,
 } from './core/models/solar/index.js';
 import { Duration, DurationFields } from './core/primitives/duration.js';
 import { Instant } from './core/primitives/instant.js';
@@ -152,6 +155,20 @@ export const ChronoFlux = Object.freeze({
      */
     findTransitions(place: Place, searchWindow: Interval, thresholdDeg: number): Instant[] {
       return solarModel.findTransitions(place, searchWindow, thresholdDeg);
+    },
+
+    /**
+     * Registers a pluggable astronomical time scale provider.
+     */
+    registerAstronomicalTimeScale(provider: AstronomicalTimeScale | null): void {
+      registerAstronomicalTimeScale(provider);
+    },
+
+    /**
+     * Retrieves the current active astronomical time scale provider.
+     */
+    getAstronomicalTimeScale(): AstronomicalTimeScale {
+      return getAstronomicalTimeScale();
     },
 
     /**

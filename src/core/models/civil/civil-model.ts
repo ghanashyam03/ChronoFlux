@@ -199,7 +199,7 @@ function evaluateDstStatus(
         return { isDaylightSaving: true, dstConfidence: 'authoritative' };
       }
       // Note: "Irish Standard Time" (Europe/Dublin) is statutory summer daylight saving time (UTC+1 vs winter GMT UTC+0).
-      if (/standard/i.test(tzNamePart)) {
+      if (/standard|mean time/i.test(tzNamePart)) {
         if (/irish/i.test(tzNamePart)) {
           return { isDaylightSaving: true, dstConfidence: 'authoritative' };
         }
@@ -207,7 +207,7 @@ function evaluateDstStatus(
       }
     }
   } catch {
-    // Fall back to heuristic
+    return { isDaylightSaving: currentOffsetMs > profile.minOffsetMs, dstConfidence: 'unknown' };
   }
 
   // Fall back to annual offset distribution heuristic

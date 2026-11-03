@@ -353,11 +353,16 @@ export function calcSolarUncertainty(
   elevationMeters: number = 0,
   tJulianCentury?: number
 ) {
-  // Truncated ephemeris error is ±0.01° within 1800-2100 CE (|t| <= 1.0).
+  // Truncated ephemeris error is ±0.01° within 1800-2100 CE (T in [-2.0, +1.0] relative to J2000.0).
   // Degrades quadratically for centuries outside this validity range.
   let numericalErrorDeg = 0.01;
   if (tJulianCentury !== undefined) {
-    const centuryExcess = Math.max(0, Math.abs(tJulianCentury) - 1.0);
+    let centuryExcess = 0;
+    if (tJulianCentury < -2.0) {
+      centuryExcess = -2.0 - tJulianCentury;
+    } else if (tJulianCentury > 1.0) {
+      centuryExcess = tJulianCentury - 1.0;
+    }
     if (centuryExcess > 0) {
       numericalErrorDeg = 0.01 + 0.05 * centuryExcess * centuryExcess;
     }
@@ -562,6 +567,163 @@ export function calcSolarMidnight(instant: Instant, longitudeDeg: number): Insta
 }
 
 /**
+ * Diagnostic result of genuine bracketed root-finding for polar solar crossings.
+ */
+export interface PolarCrossingResult {
+  readonly crossingInstant: Instant;
+  readonly status: 'converged' | 'max_iterations' | 'not_bracketed';
+  readonly iterations: number;
+  readonly residualDeg: number;
+  readonly isResidualVerified: boolean;
+}
+
+/**
+ * Solves a bracketed solar elevation crossing at polar singularity latitudes (|lat| >= 89.99°)
+ * using the Brent-Dekker algorithm with guaranteed bracket contraction, explicit convergence status,
+ * and residual verification (|h(t) - theta| < toleranceDeg).
+ *
+ * All interpolation calculations operate on relative nanosecond differences to avoid
+ * catastrophic floating-point cancellation on absolute epoch nanoseconds (~1.7e18).
+ */
+export function solvePolarCrossingBracket(
+  place: Place,
+  aNs: bigint,
+  bNs: bigint,
+  targetElevationDeg: number,
+  maxIterations: number = 50,
+  toleranceDeg: number = 1e-5
+): PolarCrossingResult | null {
+  let fA = computeSolarCoordinates(Instant.fromEpochNanoseconds(aNs), place).geometricElevationDeg - targetElevationDeg;
+  let fB = computeSolarCoordinates(Instant.fromEpochNanoseconds(bNs), place).geometricElevationDeg - targetElevationDeg;
+
+  // Tangential touch checks at endpoints
+  if (Math.abs(fA) <= 1e-6) {
+    return {
+      crossingInstant: Instant.fromEpochNanoseconds(aNs),
+      status: 'converged',
+      iterations: 0,
+      residualDeg: Math.abs(fA),
+      isResidualVerified: true,
+    };
+  }
+  if (Math.abs(fB) <= 1e-6) {
+    return {
+      crossingInstant: Instant.fromEpochNanoseconds(bNs),
+      status: 'converged',
+      iterations: 0,
+      residualDeg: Math.abs(fB),
+      isResidualVerified: true,
+    };
+  }
+
+  // Crossing must lie strictly within [aNs, bNs]
+  if (fA * fB > 0) {
+    return null;
+  }
+
+  let a = aNs;
+  let b = bNs;
+  // Ensure |f(b)| <= |f(a)| so that b is the best estimate
+  if (Math.abs(fA) < Math.abs(fB)) {
+    const tmp = a;
+    a = b;
+    b = tmp;
+    const tmpF = fA;
+    fA = fB;
+    fB = tmpF;
+  }
+
+  let c = a;
+  let fc = fA;
+  let d = 0n;
+  let mflag = true;
+
+  for (let iter = 1; iter <= maxIterations; iter++) {
+    const intervalNs = b > a ? b - a : a - b;
+    if (Math.abs(fB) <= 1e-6 || intervalNs <= 1_000_000n) {
+      const residual = Math.abs(
+        computeSolarCoordinates(Instant.fromEpochNanoseconds(b), place).geometricElevationDeg - targetElevationDeg
+      );
+      return {
+        crossingInstant: Instant.fromEpochNanoseconds(b),
+        status: 'converged',
+        iterations: iter - 1,
+        residualDeg: residual,
+        isResidualVerified: residual < toleranceDeg,
+      };
+    }
+
+    // Relative interpolation offsets relative to b (avoids floating point loss on 1.7e18 epoch nanoseconds)
+    const deltaA = Number(a - b);
+    const deltaC = Number(c - b);
+    let deltaS: number;
+
+    if (Math.abs(fA - fc) > 1e-9 && Math.abs(fB - fc) > 1e-9) {
+      // Inverse quadratic interpolation
+      const termA = deltaA * (fB * fc) / ((fA - fB) * (fA - fc));
+      const termC = deltaC * (fA * fB) / ((fc - fA) * (fc - fB));
+      deltaS = termA + termC;
+    } else {
+      // Secant method
+      deltaS = -fB * deltaA / (fA - fB);
+    }
+
+    let s = b + BigInt(Math.round(deltaS));
+
+    // Check conditions for bisection safeguard
+    const minBound = (3n * a + b) / 4n;
+    const condition1 = (minBound < b && (s < minBound || s > b)) || (minBound > b && (s > minBound || s < b));
+    const bMinusC = b > c ? b - c : c - b;
+    const bMinusS = b > s ? b - s : s - b;
+    const cMinusD = c > d ? c - d : d - c;
+    const condition2 = mflag && (bMinusS >= bMinusC / 2n);
+    const condition3 = !mflag && (bMinusS >= cMinusD / 2n);
+    const condition4 = mflag && (bMinusC < 1_000_000n);
+    const condition5 = !mflag && (cMinusD < 1_000_000n);
+
+    if (condition1 || condition2 || condition3 || condition4 || condition5) {
+      s = (a + b) / 2n;
+      mflag = true;
+    } else {
+      mflag = false;
+    }
+
+    const fs = computeSolarCoordinates(Instant.fromEpochNanoseconds(s), place).geometricElevationDeg - targetElevationDeg;
+    d = c;
+    c = b;
+    fc = fB;
+
+    if (fA * fs < 0) {
+      b = s;
+      fB = fs;
+    } else {
+      a = s;
+      fA = fs;
+    }
+
+    if (Math.abs(fA) < Math.abs(fB)) {
+      const temp = a;
+      a = b;
+      b = temp;
+      const tempF = fA;
+      fA = fB;
+      fB = tempF;
+    }
+  }
+
+  const finalResidual = Math.abs(
+    computeSolarCoordinates(Instant.fromEpochNanoseconds(b), place).geometricElevationDeg - targetElevationDeg
+  );
+  return {
+    crossingInstant: Instant.fromEpochNanoseconds(b),
+    status: finalResidual < toleranceDeg ? 'converged' : 'max_iterations',
+    iterations: maxIterations,
+    residualDeg: finalResidual,
+    isResidualVerified: finalResidual < toleranceDeg,
+  };
+}
+
+/**
  * Solves the crossing time for a target geometric elevation angle on a given branch
  * using safeguarded hybrid Newton-Raphson / bisection root-finding with explicit elevation verification.
  *
@@ -584,8 +746,8 @@ export function findSolarCrossing(
     const TWELVE_HOURS_NS = 43_200_000_000_000n;
     const aNs = noon.epochNanoseconds - TWELVE_HOURS_NS;
     const bNs = noon.epochNanoseconds + TWELVE_HOURS_NS;
-    let fA = computeSolarCoordinates(Instant.fromEpochNanoseconds(aNs), place).geometricElevationDeg - targetElevationDeg;
-    let fB = computeSolarCoordinates(Instant.fromEpochNanoseconds(bNs), place).geometricElevationDeg - targetElevationDeg;
+    const fA = computeSolarCoordinates(Instant.fromEpochNanoseconds(aNs), place).geometricElevationDeg - targetElevationDeg;
+    const fB = computeSolarCoordinates(Instant.fromEpochNanoseconds(bNs), place).geometricElevationDeg - targetElevationDeg;
 
     const dElevPerDay = fB - fA;
     if (Math.abs(dElevPerDay) < 1e-6) {
@@ -597,93 +759,9 @@ export function findSolarCrossing(
       return null;
     }
 
-    if (Math.abs(fA) < 1e-5) {
-      return Instant.fromEpochNanoseconds(aNs);
-    }
-    if (Math.abs(fB) < 1e-5) {
-      return Instant.fromEpochNanoseconds(bNs);
-    }
-
-    // Bracket check: crossing must lie strictly within [aNs, bNs]
-    if (fA * fB > 0) {
-      return null;
-    }
-
-    // Genuine bracketed root-finding (Brent-Dekker) with explicit convergence status and residual verification
-    let a = aNs;
-    let b = bNs;
-    let c = a;
-    let fc = fA;
-    let d = 0n;
-    let mflag = true;
-
-    for (let iter = 0; iter < 50; iter++) {
-      if (Math.abs(fB) < 1e-6 || (b > a ? b - a : a - b) <= 1_000_000n) {
-        break;
-      }
-
-      let s: bigint;
-      if (Math.abs(fA - fc) > 1e-9 && Math.abs(fB - fc) > 1e-9) {
-        // Inverse quadratic interpolation
-        const termA = Number(a) * (fB * fc) / ((fA - fB) * (fA - fc));
-        const termB = Number(b) * (fA * fc) / ((fB - fA) * (fB - fc));
-        const termC = Number(c) * (fA * fB) / ((fc - fA) * (fc - fB));
-        s = BigInt(Math.round(termA + termB + termC));
-      } else {
-        // Secant method
-        const sNum = Number(b) - fB * Number(b - a) / (fB - fA);
-        s = BigInt(Math.round(sNum));
-      }
-
-      // Check conditions for bisection safeguard
-      const minBound = (3n * a + b) / 4n;
-      const condition1 = (minBound < b && (s < minBound || s > b)) || (minBound > b && (s > minBound || s < b));
-      const bMinusC = b > c ? b - c : c - b;
-      const bMinusS = b > s ? b - s : s - b;
-      const cMinusD = c > d ? c - d : d - c;
-      const condition2 = mflag && (bMinusS >= bMinusC / 2n);
-      const condition3 = !mflag && (bMinusS >= cMinusD / 2n);
-      const condition4 = mflag && (bMinusC < 1_000_000n);
-      const condition5 = !mflag && (cMinusD < 1_000_000n);
-
-      if (condition1 || condition2 || condition3 || condition4 || condition5) {
-        s = (a + b) / 2n;
-        mflag = true;
-      } else {
-        mflag = false;
-      }
-
-      const fs = computeSolarCoordinates(Instant.fromEpochNanoseconds(s), place).geometricElevationDeg - targetElevationDeg;
-      d = c;
-      c = b;
-      fc = fB;
-
-      if (fA * fs < 0) {
-        b = s;
-        fB = fs;
-      } else {
-        a = s;
-        fA = fs;
-      }
-
-      if (Math.abs(fA) < Math.abs(fB)) {
-        const temp = a;
-        a = b;
-        b = temp;
-        const tempF = fA;
-        fA = fB;
-        fB = tempF;
-      }
-    }
-
-    const candidate = Instant.fromEpochNanoseconds(b);
-    const finalResidual = Math.abs(
-      computeSolarCoordinates(candidate, place).geometricElevationDeg - targetElevationDeg
-    );
-
-    // Explicit residual verification: |h(t) - theta| < 1e-5°
-    if (finalResidual < 1e-5) {
-      return candidate;
+    const solveResult = solvePolarCrossingBracket(place, aNs, bNs, targetElevationDeg);
+    if (solveResult !== null && solveResult.status === 'converged' && solveResult.isResidualVerified) {
+      return solveResult.crossingInstant;
     }
     return null;
   }

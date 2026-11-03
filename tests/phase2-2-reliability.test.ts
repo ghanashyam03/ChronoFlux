@@ -21,6 +21,7 @@ import {
   computeSolarCoordinates,
   findSolarCrossing,
   NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
+  solvePolarCrossingBracket,
 } from '../src/core/models/solar/math.js';
 import {
   AstronomicalTimeScale,
@@ -106,6 +107,43 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
         'setting'
       );
       expect(wrongDirection).toBeNull();
+    });
+
+    it('returns explicit convergence status and residual verification from solvePolarCrossingBracket', () => {
+      const equinoxNoon = ChronoFlux.instant('2026-03-18T12:00:00Z');
+      const TWELVE_HOURS_NS = 43_200_000_000_000n;
+      const aNs = equinoxNoon.epochNanoseconds - TWELVE_HOURS_NS;
+      const bNs = equinoxNoon.epochNanoseconds + TWELVE_HOURS_NS;
+
+      const result = solvePolarCrossingBracket(
+        northPole,
+        aNs,
+        bNs,
+        NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.status).toBe('converged');
+      expect(result!.isResidualVerified).toBe(true);
+      expect(result!.residualDeg).toBeLessThan(1e-5);
+      expect(result!.iterations).toBeGreaterThan(0);
+    });
+
+    it('returns null when bracket does not span the target solar elevation', () => {
+      // In mid-January at North Pole, sun elevation is deep below -15°; target is -0.833°
+      const midWinterNoon = ChronoFlux.instant('2026-01-15T12:00:00Z');
+      const TWELVE_HOURS_NS = 43_200_000_000_000n;
+      const aNs = midWinterNoon.epochNanoseconds - TWELVE_HOURS_NS;
+      const bNs = midWinterNoon.epochNanoseconds + TWELVE_HOURS_NS;
+
+      const result = solvePolarCrossingBracket(
+        northPole,
+        aNs,
+        bNs,
+        NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG
+      );
+
+      expect(result).toBeNull();
     });
 
     it('property-based test: polar root-finding produces strictly bracketed, monotonic convergence', () => {
@@ -321,42 +359,73 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       registerAstronomicalTimeScale(null);
       expect(getAstronomicalTimeScale()).toBe(standardAstronomicalTimeScale);
     });
+
+    it('exposes astronomical time scale methods symmetrically on ChronoFlux.solar facade', () => {
+      expect(ChronoFlux.solar.getAstronomicalTimeScale()).toBe(standardAstronomicalTimeScale);
+
+      const customScale: AstronomicalTimeScale = {
+        getDeltaT: () => 42.0,
+        toTerrestrialJulianDay: () => 2451545.0,
+        toUt1JulianDay: () => 2451545.0,
+        toTerrestrialJulianCentury: () => 0.0,
+      };
+
+      ChronoFlux.solar.registerAstronomicalTimeScale(customScale);
+      expect(ChronoFlux.solar.getAstronomicalTimeScale()).toBe(customScale);
+      expect(ChronoFlux.solar.getAstronomicalTimeScale().getDeltaT(ChronoFlux.now())).toBe(42.0);
+
+      // Restore default
+      ChronoFlux.solar.registerAstronomicalTimeScale(null);
+      expect(ChronoFlux.solar.getAstronomicalTimeScale()).toBe(standardAstronomicalTimeScale);
+    });
   });
 
   // =========================================================================
   // 6. Validity Enforcement
   // =========================================================================
   describe('6. Validity Enforcement (1800-2100 CE Range & Degradation)', () => {
-    it('marks evaluations within 1800-2100 as valid with non-degraded accuracy', () => {
-      const inRangeInstant = ChronoFlux.instant('2026-06-21T12:00:00Z');
-      const state = ChronoFlux.solar.evaluate(inRangeInstant, greenwich);
+    it('marks evaluations within 1800-2100 (including 19th century T in [-2.0, +1.0]) as valid with non-degraded accuracy', () => {
+      const datesToTest = [
+        '1800-01-01T00:00:00Z', // Lower validity bound (T ≈ -2.0)
+        '1850-06-21T12:00:00Z', // 19th century mid-point (T ≈ -1.5)
+        '1900-01-01T00:00:00Z', // Turn of 20th century (T ≈ -1.0)
+        '2000-01-01T12:00:00Z', // J2000.0 epoch (T = 0.0)
+        '2026-06-21T12:00:00Z', // Modern evaluation
+        '2099-12-31T23:59:59Z', // Upper validity bound (T ≈ +1.0)
+      ];
 
-      expect(state.isWithinValidityRange).toBe(true);
-      expect(state.isAccuracyDegraded).toBe(false);
-      expect(state.uncertainty.numericalErrorDeg).toBe(0.01);
+      for (const iso of datesToTest) {
+        const inst = ChronoFlux.instant(iso);
+        const state = ChronoFlux.solar.evaluate(inst, greenwich);
 
-      const pos = ChronoFlux.solar.evaluatePosition(inRangeInstant, greenwich);
-      expect(pos.isWithinValidityRange).toBe(true);
-      expect(pos.isAccuracyDegraded).toBe(false);
+        expect(state.isWithinValidityRange).toBe(true);
+        expect(state.isAccuracyDegraded).toBe(false);
+        expect(state.uncertainty.numericalErrorDeg).toBe(0.01);
+
+        const pos = ChronoFlux.solar.evaluatePosition(inst, greenwich);
+        expect(pos.isWithinValidityRange).toBe(true);
+        expect(pos.isAccuracyDegraded).toBe(false);
+        expect(pos.uncertainty.numericalErrorDeg).toBe(0.01);
+      }
     });
 
     it('explicitly marks evaluations outside 1800-2100 as out-of-range with degraded accuracy', () => {
-      // Year 1600 CE (2 centuries before 1800)
+      // Year 1600 CE (2 centuries before 1800, T ≈ -4.0, excess = 2.0)
       const historicalInstant = ChronoFlux.instant('1600-01-01T00:00:00Z');
       const histState = ChronoFlux.solar.evaluate(historicalInstant, greenwich);
 
       expect(histState.isWithinValidityRange).toBe(false);
       expect(histState.isAccuracyDegraded).toBe(true);
-      // Ephemeris error expands when extrapolated outside validity range
-      expect(histState.uncertainty.numericalErrorDeg).toBeGreaterThan(0.01);
+      // Ephemeris error expands quadratically: 0.01 + 0.05 * 2^2 = 0.21°
+      expect(histState.uncertainty.numericalErrorDeg).toBeCloseTo(0.21, 2);
 
-      // Year 2300 CE (2 centuries after 2100)
+      // Year 2300 CE (2 centuries after 2100, T ≈ +3.0, excess = 2.0)
       const futureInstant = ChronoFlux.instant('2300-01-01T00:00:00Z');
       const futureState = ChronoFlux.solar.evaluate(futureInstant, greenwich);
 
       expect(futureState.isWithinValidityRange).toBe(false);
       expect(futureState.isAccuracyDegraded).toBe(true);
-      expect(futureState.uncertainty.numericalErrorDeg).toBeGreaterThan(0.01);
+      expect(futureState.uncertainty.numericalErrorDeg).toBeCloseTo(0.21, 2);
     });
   });
 
@@ -382,13 +451,32 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       expect(state.utcOffsetMinutes).toBe(-300); // EST UTC-5
     });
 
-    it('classifies Irish Standard Time (IST UTC+1 in summer) as authoritative DST', () => {
+    it('classifies British Summer Time (BST) and Greenwich Mean Time (GMT) as authoritative in London', () => {
       const summerInstant = ChronoFlux.instant('2026-07-01T12:00:00Z');
-      const state = ChronoFlux.civil.evaluate(summerInstant, dublin);
+      const summerState = ChronoFlux.civil.evaluate(summerInstant, greenwich);
+      expect(summerState.isDaylightSaving).toBe(true);
+      expect(summerState.dstConfidence).toBe('authoritative');
+      expect(summerState.utcOffsetMinutes).toBe(60); // BST UTC+1
 
-      expect(state.isDaylightSaving).toBe(true);
-      expect(state.dstConfidence).toBe('authoritative');
-      expect(state.utcOffsetMinutes).toBe(60); // UTC+1
+      const winterInstant = ChronoFlux.instant('2026-01-01T12:00:00Z');
+      const winterState = ChronoFlux.civil.evaluate(winterInstant, greenwich);
+      expect(winterState.isDaylightSaving).toBe(false);
+      expect(winterState.dstConfidence).toBe('authoritative');
+      expect(winterState.utcOffsetMinutes).toBe(0); // GMT UTC+0
+    });
+
+    it('classifies Irish Standard Time (IST UTC+1 in summer) as authoritative DST, and GMT as winter standard', () => {
+      const summerInstant = ChronoFlux.instant('2026-07-01T12:00:00Z');
+      const summerState = ChronoFlux.civil.evaluate(summerInstant, dublin);
+      expect(summerState.isDaylightSaving).toBe(true);
+      expect(summerState.dstConfidence).toBe('authoritative');
+      expect(summerState.utcOffsetMinutes).toBe(60); // IST UTC+1
+
+      const winterInstant = ChronoFlux.instant('2026-01-01T12:00:00Z');
+      const winterState = ChronoFlux.civil.evaluate(winterInstant, dublin);
+      expect(winterState.isDaylightSaving).toBe(false);
+      expect(winterState.dstConfidence).toBe('authoritative');
+      expect(winterState.utcOffsetMinutes).toBe(0); // GMT UTC+0
     });
 
     it('classifies non-DST time zones as authoritatively false', () => {
@@ -405,6 +493,34 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       const kolkataState = ChronoFlux.civil.evaluate(instant, kolkata);
       expect(kolkataState.isDaylightSaving).toBe(false);
       expect(kolkataState.dstConfidence).toBe('authoritative');
+    });
+
+    it('falls back to heuristic confidence for time zones with numeric runtime names (Casablanca)', () => {
+      const casablanca = ChronoFlux.place({ latitude: 33.5731, longitude: -7.5898, timeZoneId: 'Africa/Casablanca' });
+      const instant = ChronoFlux.instant('2026-07-01T12:00:00Z');
+      const state = ChronoFlux.civil.evaluate(instant, casablanca);
+
+      // Africa/Casablanca produces purely numeric GMT offset names in Intl without 'Daylight' or 'Standard' markers
+      expect(state.dstConfidence).toBe('heuristic');
+    });
+
+    it('returns unknown confidence when runtime formatter fails unexpectedly', () => {
+      const originalFormatToParts = Intl.DateTimeFormat.prototype.formatToParts;
+      Intl.DateTimeFormat.prototype.formatToParts = function (date?: Date | number) {
+        if (this.resolvedOptions().timeZoneName) {
+          throw new Error('Simulated runtime Intl failure');
+        }
+        return originalFormatToParts.call(this, date);
+      };
+
+      try {
+        const ny = ChronoFlux.place({ latitude: 40.7128, longitude: -74.006, timeZoneId: 'America/New_York' });
+        const instant = ChronoFlux.instant('2026-07-01T12:00:00Z');
+        const state = ChronoFlux.civil.evaluate(instant, ny);
+        expect(state.dstConfidence).toBe('unknown');
+      } finally {
+        Intl.DateTimeFormat.prototype.formatToParts = originalFormatToParts;
+      }
     });
   });
 
