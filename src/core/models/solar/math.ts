@@ -5,7 +5,14 @@
  */
 
 import { Instant } from '../../primitives/instant.js';
+import { Interval } from '../../primitives/interval.js';
 import { Place } from '../../primitives/place.js';
+import { AstronomicalTimeScale, getAstronomicalTimeScale } from './timescale.js';
+
+export const SOLAR_MODEL_VALIDITY_RANGE = new Interval(
+  Instant.fromEpochMilliseconds(-5364662400000), // 1800-01-01T00:00:00Z
+  Instant.fromEpochMilliseconds(4133980800000)  // 2101-01-01T00:00:00Z
+);
 
 export const DEG_TO_RAD = Math.PI / 180.0;
 export const RAD_TO_DEG = 180.0 / Math.PI;
@@ -30,6 +37,18 @@ export const NAUTICAL_TWILIGHT_ELEVATION_DEG = -12.0;
  * Astronomical twilight boundary in degrees (-18.0°).
  */
 export const ASTRONOMICAL_TWILIGHT_ELEVATION_DEG = -18.0;
+
+/**
+ * Calculates geometric horizon dip in degrees for an observer at height h meters
+ * above the unobstructed sea-level horizon:
+ * d_dip = (1.76 / 60) * sqrt(max(0, h_meters)) degrees.
+ *
+ * Explicit Assumption: Assumes unobstructed sea-level horizon dip.
+ * Does NOT model local topographical features, mountain ridges, or architectural/building obstruction.
+ */
+export function calcHorizonDip(elevationMeters: number = 0): number {
+  return elevationMeters > 0 ? (1.76 / 60.0) * Math.sqrt(elevationMeters) : 0.0;
+}
 
 export function degToRad(degrees: number): number {
   return degrees * DEG_TO_RAD;
@@ -57,10 +76,15 @@ export function julianDayToJulianCentury(jd: number): number {
 }
 
 /**
- * Converts a ChronoFlux Instant directly to Julian Century (T).
+ * Converts a ChronoFlux Instant to Julian Century (T_TT) on the Terrestrial Time scale
+ * using the active astronomical timescale provider:
+ * T_TT = (JD_UTC + (Delta T + DUT1) / 86400.0 - 2451545.0) / 36525.0.
  */
-export function instantToJulianCentury(instant: Instant): number {
-  return julianDayToJulianCentury(instantToJulianDay(instant));
+export function instantToJulianCentury(
+  instant: Instant,
+  timeScale: AstronomicalTimeScale = getAstronomicalTimeScale()
+): number {
+  return timeScale.toTerrestrialJulianCentury(instant);
 }
 
 /**
@@ -198,17 +222,25 @@ export function calcEquationOfTime(
 }
 
 /**
- * Calculates True Solar Time (TST) in minutes of day [0, 1440).
+ * Calculates True Solar Time (TST) in minutes of day [0, 1440) using Earth rotation (UT1):
+ * UT1 = UTC + DUT1.
+ * TST = UT1_minutes + EoT + 4 * longitude.
  */
 export function calcTrueSolarTime(
   instant: Instant,
   equationOfTimeMinutes: number,
-  longitudeDeg: number
+  longitudeDeg: number,
+  timeScale: AstronomicalTimeScale = getAstronomicalTimeScale()
 ): number {
+  const dut1Sec = timeScale.getDut1
+    ? timeScale.getDut1(instant)
+    : (timeScale.toUt1JulianDay(instant) - instantToJulianDay(instant)) * 86400.0;
+  const dut1Minutes = dut1Sec / 60.0;
   const dayNs = instant.epochNanoseconds % 86_400_000_000_000n;
   const positiveDayNs = dayNs >= 0n ? dayNs : 86_400_000_000_000n + dayNs;
   const utcMinutesOfDay = Number(positiveDayNs) / 60_000_000_000;
-  let tst = (utcMinutesOfDay + equationOfTimeMinutes + 4.0 * longitudeDeg) % 1440.0;
+  const ut1MinutesOfDay = utcMinutesOfDay + dut1Minutes;
+  let tst = (ut1MinutesOfDay + equationOfTimeMinutes + 4.0 * longitudeDeg) % 1440.0;
   if (tst < 0) {
     tst += 1440.0;
   }
@@ -398,7 +430,7 @@ export function calcSolarUncertainty(
     }
   }
 
-  const horizonLimitationDeg = elevationMeters > 0 ? 0.0293 * Math.sqrt(elevationMeters) : 0.0;
+  const horizonLimitationDeg = calcHorizonDip(elevationMeters);
 
   return {
     numericalErrorDeg,
@@ -440,10 +472,15 @@ export function calcSolarCrossingUncertainty(
 }
 
 /**
- * Computes the solar coordinates bundle at a given instant and place.
+ * Computes the solar coordinates bundle at a given instant and place using the active
+ * astronomical time-scale provider (TT for ephemeris, UT1 for diurnal rotation).
  */
-export function computeSolarCoordinates(instant: Instant, place: Place) {
-  const t = instantToJulianCentury(instant);
+export function computeSolarCoordinates(
+  instant: Instant,
+  place: Place,
+  timeScale: AstronomicalTimeScale = getAstronomicalTimeScale()
+) {
+  const t = instantToJulianCentury(instant, timeScale);
   const l0 = calcGeomMeanLongSun(t);
   const m = calcGeomMeanAnomalySun(t);
   const e = calcEccentricityEarthOrbit(t);
@@ -455,7 +492,7 @@ export function computeSolarCoordinates(instant: Instant, place: Place) {
   const rightAscensionDeg = calcSunRightAscension(appLong, obliqCorr);
   const declinationDeg = calcSunDeclination(appLong, obliqCorr);
   const equationOfTimeMinutes = calcEquationOfTime(l0, m, e, obliqCorr);
-  const trueSolarTimeMinutes = calcTrueSolarTime(instant, equationOfTimeMinutes, place.longitude);
+  const trueSolarTimeMinutes = calcTrueSolarTime(instant, equationOfTimeMinutes, place.longitude, timeScale);
   const hourAngleDeg = calcHourAngle(trueSolarTimeMinutes);
 
   const angles = calcSolarElevationAndZenith(place.latitude, declinationDeg, hourAngleDeg);
@@ -567,6 +604,12 @@ export function calcSolarMidnight(instant: Instant, longitudeDeg: number): Insta
 }
 
 /**
+ * Maximum safe bracket width in nanoseconds for relative nanosecond Number conversion.
+ * Stays well within Number.MAX_SAFE_INTEGER (~9e15 ns ≈ 104.2 days).
+ */
+export const MAX_SAFE_POLAR_BRACKET_WIDTH_NS = 9_000_000_000_000_000n;
+
+/**
  * Diagnostic result of genuine bracketed root-finding for polar solar crossings.
  */
 export interface PolarCrossingResult {
@@ -580,7 +623,7 @@ export interface PolarCrossingResult {
 /**
  * Solves a bracketed solar elevation crossing at polar singularity latitudes (|lat| >= 89.99°)
  * using the Brent-Dekker algorithm with guaranteed bracket contraction, explicit convergence status,
- * and residual verification (|h(t) - theta| < toleranceDeg).
+ * and residual verification (|h(t) - theta| <= toleranceDeg).
  *
  * All interpolation calculations operate on relative nanosecond differences to avoid
  * catastrophic floating-point cancellation on absolute epoch nanoseconds (~1.7e18).
@@ -592,23 +635,51 @@ export function solvePolarCrossingBracket(
   targetElevationDeg: number,
   maxIterations: number = 50,
   toleranceDeg: number = 1e-5
-): PolarCrossingResult | null {
-  let fA = computeSolarCoordinates(Instant.fromEpochNanoseconds(aNs), place).geometricElevationDeg - targetElevationDeg;
-  let fB = computeSolarCoordinates(Instant.fromEpochNanoseconds(bNs), place).geometricElevationDeg - targetElevationDeg;
+): PolarCrossingResult {
+  if (typeof toleranceDeg !== 'number' || !Number.isFinite(toleranceDeg) || toleranceDeg <= 0) {
+    throw new RangeError(`toleranceDeg must be a positive finite number, received: ${toleranceDeg}`);
+  }
+  if (typeof maxIterations !== 'number' || !Number.isInteger(maxIterations) || maxIterations < 1) {
+    throw new RangeError(`maxIterations must be an integer >= 1, received: ${maxIterations}`);
+  }
+  if (typeof targetElevationDeg !== 'number' || !Number.isFinite(targetElevationDeg)) {
+    throw new TypeError(`targetElevationDeg must be a finite number, received: ${targetElevationDeg}`);
+  }
+  if (typeof aNs !== 'bigint' || typeof bNs !== 'bigint') {
+    throw new TypeError('aNs and bNs must be bigints');
+  }
 
-  // Tangential touch checks at endpoints
-  if (Math.abs(fA) <= 1e-6) {
+  // Support reversed brackets by ordering endpoints chronologically
+  let startNs = aNs;
+  let endNs = bNs;
+  if (startNs > endNs) {
+    startNs = bNs;
+    endNs = aNs;
+  }
+
+  const bracketWidthNs = endNs - startNs;
+  if (bracketWidthNs > MAX_SAFE_POLAR_BRACKET_WIDTH_NS) {
+    throw new RangeError(
+      `Bracket width (${bracketWidthNs} ns) exceeds maximum safe bracket width (${MAX_SAFE_POLAR_BRACKET_WIDTH_NS} ns) for relative nanosecond arithmetic.`
+    );
+  }
+
+  let fA = computeSolarCoordinates(Instant.fromEpochNanoseconds(startNs), place).geometricElevationDeg - targetElevationDeg;
+  let fB = computeSolarCoordinates(Instant.fromEpochNanoseconds(endNs), place).geometricElevationDeg - targetElevationDeg;
+
+  // Tangential touch checks at endpoints respecting toleranceDeg
+  if (Math.abs(fA) <= toleranceDeg) {
     return {
-      crossingInstant: Instant.fromEpochNanoseconds(aNs),
+      crossingInstant: Instant.fromEpochNanoseconds(startNs),
       status: 'converged',
       iterations: 0,
       residualDeg: Math.abs(fA),
       isResidualVerified: true,
     };
   }
-  if (Math.abs(fB) <= 1e-6) {
+  if (Math.abs(fB) <= toleranceDeg) {
     return {
-      crossingInstant: Instant.fromEpochNanoseconds(bNs),
+      crossingInstant: Instant.fromEpochNanoseconds(endNs),
       status: 'converged',
       iterations: 0,
       residualDeg: Math.abs(fB),
@@ -616,13 +687,21 @@ export function solvePolarCrossingBracket(
     };
   }
 
-  // Crossing must lie strictly within [aNs, bNs]
-  if (fA * fB > 0) {
-    return null;
+  // Crossing must lie strictly within [startNs, endNs]
+  if (fA * fB > 0 || startNs === endNs) {
+    const bestNs = Math.abs(fA) <= Math.abs(fB) ? startNs : endNs;
+    const bestResidual = Math.min(Math.abs(fA), Math.abs(fB));
+    return {
+      crossingInstant: Instant.fromEpochNanoseconds(bestNs),
+      status: 'not_bracketed',
+      iterations: 0,
+      residualDeg: bestResidual,
+      isResidualVerified: false,
+    };
   }
 
-  let a = aNs;
-  let b = bNs;
+  let a = startNs;
+  let b = endNs;
   // Ensure |f(b)| <= |f(a)| so that b is the best estimate
   if (Math.abs(fA) < Math.abs(fB)) {
     const tmp = a;
@@ -640,16 +719,32 @@ export function solvePolarCrossingBracket(
 
   for (let iter = 1; iter <= maxIterations; iter++) {
     const intervalNs = b > a ? b - a : a - b;
-    if (Math.abs(fB) <= 1e-6 || intervalNs <= 1_000_000n) {
+    if (Math.abs(fB) <= toleranceDeg) {
       const residual = Math.abs(
         computeSolarCoordinates(Instant.fromEpochNanoseconds(b), place).geometricElevationDeg - targetElevationDeg
       );
+      if (residual <= toleranceDeg) {
+        return {
+          crossingInstant: Instant.fromEpochNanoseconds(b),
+          status: 'converged',
+          iterations: iter - 1,
+          residualDeg: residual,
+          isResidualVerified: true,
+        };
+      }
+    }
+
+    if (intervalNs <= 1_000_000n) {
+      const residual = Math.abs(
+        computeSolarCoordinates(Instant.fromEpochNanoseconds(b), place).geometricElevationDeg - targetElevationDeg
+      );
+      const isVerified = residual <= toleranceDeg;
       return {
         crossingInstant: Instant.fromEpochNanoseconds(b),
-        status: 'converged',
+        status: isVerified ? 'converged' : 'max_iterations',
         iterations: iter - 1,
         residualDeg: residual,
-        isResidualVerified: residual < toleranceDeg,
+        isResidualVerified: isVerified,
       };
     }
 
@@ -714,12 +809,13 @@ export function solvePolarCrossingBracket(
   const finalResidual = Math.abs(
     computeSolarCoordinates(Instant.fromEpochNanoseconds(b), place).geometricElevationDeg - targetElevationDeg
   );
+  const isFinalVerified = finalResidual <= toleranceDeg;
   return {
     crossingInstant: Instant.fromEpochNanoseconds(b),
-    status: finalResidual < toleranceDeg ? 'converged' : 'max_iterations',
+    status: isFinalVerified ? 'converged' : 'max_iterations',
     iterations: maxIterations,
     residualDeg: finalResidual,
-    isResidualVerified: finalResidual < toleranceDeg,
+    isResidualVerified: isFinalVerified,
   };
 }
 
@@ -760,7 +856,7 @@ export function findSolarCrossing(
     }
 
     const solveResult = solvePolarCrossingBracket(place, aNs, bNs, targetElevationDeg);
-    if (solveResult !== null && solveResult.status === 'converged' && solveResult.isResidualVerified) {
+    if (solveResult.status === 'converged' && solveResult.isResidualVerified) {
       return solveResult.crossingInstant;
     }
     return null;

@@ -5,26 +5,48 @@
 
 import { Duration } from '../../primitives/duration.js';
 import { Instant } from '../../primitives/instant.js';
+import { Place } from '../../primitives/place.js';
 import {
   ASTRONOMICAL_TWILIGHT_ELEVATION_DEG,
+  calcHorizonDip,
   calcSolarMidnight,
   calcSolarNoon,
   CIVIL_TWILIGHT_ELEVATION_DEG,
+  computeSolarCoordinates,
   findSolarCrossing,
   NAUTICAL_TWILIGHT_ELEVATION_DEG,
   NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
+  SOLAR_MODEL_VALIDITY_RANGE,
 } from './math.js';
-import { SolarEventOptions } from './types.js';
+import { SolarEventInstant, SolarEventName, SolarEventOptions } from './types.js';
 
 const ONE_DAY_NS = 86_400_000_000_000n;
+
+function createEventInstant(
+  instant: Instant,
+  event: SolarEventName,
+  place: Place
+): SolarEventInstant {
+  const coords = computeSolarCoordinates(instant, place);
+  const isWithinValidityRange = SOLAR_MODEL_VALIDITY_RANGE.contains(instant);
+  const isAccuracyDegraded = !isWithinValidityRange;
+  return new SolarEventInstant(instant.epochNanoseconds, {
+    event,
+    isWithinValidityRange,
+    isAccuracyDegraded,
+    uncertaintyDeg: coords.uncertainty.combinedCoordinateUncertaintyDeg,
+    uncertaintyMinutes: coords.uncertainty.eventTimeUncertaintyMinutes,
+    uncertainty: coords.uncertainty,
+  });
+}
 
 /**
  * Finds the next occurrence of a solar event strictly after the specified instant.
  *
  * @param options Query options specifying event name, location, anchor instant, and search limit.
- * @returns The Instant of the next event, or null if the event does not occur within searchLimitDays.
+ * @returns The SolarEventInstant of the next event, or null if the event does not occur within searchLimitDays.
  */
-export function findNextSolarEvent(options: SolarEventOptions): Instant | null {
+export function findNextSolarEvent(options: SolarEventOptions): SolarEventInstant | null {
   const { event, place, after, searchLimitDays = 365 } = options;
 
   if (typeof searchLimitDays !== 'number' || !Number.isFinite(searchLimitDays) || searchLimitDays <= 0) {
@@ -42,7 +64,10 @@ export function findNextSolarEvent(options: SolarEventOptions): Instant | null {
       const nextDay = Instant.fromEpochNanoseconds(after.epochNanoseconds + ONE_DAY_NS);
       noon = calcSolarNoon(nextDay, place.longitude);
     }
-    return noon.isBefore(maxInstant) || noon.equals(maxInstant) ? noon : null;
+    if (noon.isBefore(maxInstant) || noon.equals(maxInstant)) {
+      return createEventInstant(noon, 'solarNoon', place);
+    }
+    return null;
   }
 
   // 2. Solar Midnight: occurs every diurnal cycle
@@ -52,7 +77,10 @@ export function findNextSolarEvent(options: SolarEventOptions): Instant | null {
       const nextDay = Instant.fromEpochNanoseconds(after.epochNanoseconds + ONE_DAY_NS);
       midnight = calcSolarMidnight(nextDay, place.longitude);
     }
-    return midnight.isBefore(maxInstant) || midnight.equals(maxInstant) ? midnight : null;
+    if (midnight.isBefore(maxInstant) || midnight.equals(maxInstant)) {
+      return createEventInstant(midnight, 'solarMidnight', place);
+    }
+    return null;
   }
 
   // 3. Elevation crossings: sunrise, sunset, civilDawn, civilDusk, nauticalDawn, nauticalDusk, astronomicalDawn, astronomicalDusk
@@ -61,11 +89,11 @@ export function findNextSolarEvent(options: SolarEventOptions): Instant | null {
 
   switch (event) {
     case 'sunrise':
-      targetAngleDeg = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG;
+      targetAngleDeg = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG - calcHorizonDip(place.elevationMeters);
       direction = 'rising';
       break;
     case 'sunset':
-      targetAngleDeg = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG;
+      targetAngleDeg = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG - calcHorizonDip(place.elevationMeters);
       direction = 'setting';
       break;
     case 'civilDawn':
@@ -106,7 +134,7 @@ export function findNextSolarEvent(options: SolarEventOptions): Instant | null {
     const crossing = findSolarCrossing(place, noon, targetAngleDeg, direction);
     if (crossing !== null && crossing.isAfter(after)) {
       if (crossing.isBefore(maxInstant) || crossing.equals(maxInstant)) {
-        return crossing;
+        return createEventInstant(crossing, event, place);
       }
       return null;
     }

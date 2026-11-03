@@ -16,13 +16,20 @@
  *    friction braking of Earth's rotation and core-mantle angular momentum transfer.
  *
  * Present Model Assumptions & Limitations:
- * In practical civil and low-to-medium accuracy solar calculations (Jean Meeus / NOAA),
- * Julian Centuries relative to J2000.0 (T) are evaluated directly from Unix time (UTC proxy).
- * The resulting angular discrepancy Δθ ≈ ΔT * (15 arcsec/sec) is ~0.0003° (1.05 arcsec)
- * for ΔT ~ 70s, which is well below the model's ±0.01° declared ephemeris precision bound.
+ * 1. Diurnal Earth rotation rate: omega_diurnal = 360° / 86400s = 15 arcsec/s ≈ 0.004167°/s.
+ *    Tied to UT1 (Universal Time 1), governing Earth rotation angle, hour angle, solar noon, and azimuth.
+ *    DUT1 = UT1 - UTC. Under standard civil broadcast time, |DUT1| < 0.9s via leap seconds.
+ * 2. Planetary orbital motion rate: omega_orbit ≈ 360° / (365.25 * 86400s) ≈ 0.041 arcsec/s.
+ *    Tied to TT (Terrestrial Time), governing ephemeris orbital longitude, mean anomaly, and solar declination.
+ *    Delta T = TT - UT1. Accumulated difference from Earth's tidal braking.
+ *    Delta T_(TT-UTC) = TT - UTC = (TT - UT1) + (UT1 - UTC) = Delta T + DUT1.
+ * 3. Angular Discrepancy Analysis:
+ *    For Delta T ≈ 70s, the orbital ephemeris discrepancy on TT is ~70 * 0.041" ≈ 2.87 arcsec ≈ 0.0008°,
+ *    well within the model's ±0.01° declared ephemeris precision bound.
+ *    However, a 1-second offset on UT1 (DUT1) produces a full 15 arcsec (0.004167°) diurnal shift.
  *
- * This module provides an extensible conversion interface for future sub-arcsecond
- * high-accuracy astronomical models (e.g. VSOP87, JPL DE440).
+ * This module provides an active, pluggable time-scale provider interface integrating TT into
+ * solar ephemeris calculations and UT1 into diurnal rotation and True Solar Time.
  */
 
 import { Instant } from '../../primitives/instant.js';
@@ -38,12 +45,14 @@ export interface AstronomicalTimeScale {
   getDeltaT(instant: Instant): number;
 
   /**
-   * Converts an Instant to Terrestrial Time (TT) expressed as a fractional Julian Day.
+   * Converts an Instant to Terrestrial Time (TT) expressed as a fractional Julian Day:
+   * JD_TT = JD_UTC + (Delta T + DUT1) / 86400.0.
    */
   toTerrestrialJulianDay(instant: Instant): number;
 
   /**
-   * Converts an Instant to Universal Time (UT1) expressed as a fractional Julian Day.
+   * Converts an Instant to Universal Time (UT1) expressed as a fractional Julian Day:
+   * JD_UT1 = JD_UTC + DUT1 / 86400.0.
    */
   toUt1JulianDay(instant: Instant): number;
 
@@ -51,6 +60,12 @@ export interface AstronomicalTimeScale {
    * Converts an Instant to Julian Century (T_TT) relative to J2000.0 on the Terrestrial Time scale.
    */
   toTerrestrialJulianCentury(instant: Instant): number;
+
+  /**
+   * Optional method returning DUT1 (UT1 - UTC) in seconds.
+   * If omitted, DUT1 is derived from toUt1JulianDay(instant) - instantToJulianDay(instant).
+   */
+  getDut1?(instant: Instant): number;
 }
 
 /**
@@ -153,20 +168,32 @@ export class StandardAstronomicalTimeScale implements AstronomicalTimeScale {
   }
 
   /**
-   * Converts an Instant to Terrestrial Time (TT) Julian Day.
+   * Returns DUT1 (UT1 - UTC) in seconds.
+   * Under standard civil approximation without external IERS Bulletin A feed, DUT1 is 0.0 (|DUT1| < 0.9s).
+   */
+  getDut1(_instant: Instant): number {
+    return 0.0;
+  }
+
+  /**
+   * Converts an Instant to Terrestrial Time (TT) Julian Day:
+   * JD_TT = JD_UTC + (Delta T + DUT1) / 86400.0.
    */
   toTerrestrialJulianDay(instant: Instant): number {
     const jdUt = instantToJulianDay(instant);
     const deltaTSec = this.getDeltaT(instant);
-    return jdUt + deltaTSec / 86400.0;
+    const dut1Sec = this.getDut1(instant);
+    return jdUt + (deltaTSec + dut1Sec) / 86400.0;
   }
 
   /**
-   * Converts an Instant to Universal Time (UT1) Julian Day.
-   * Under standard civil approximation, UT1 ≈ UTC.
+   * Converts an Instant to Universal Time (UT1) Julian Day:
+   * JD_UT1 = JD_UTC + DUT1 / 86400.0.
    */
   toUt1JulianDay(instant: Instant): number {
-    return instantToJulianDay(instant);
+    const jdUt = instantToJulianDay(instant);
+    const dut1Sec = this.getDut1(instant);
+    return jdUt + dut1Sec / 86400.0;
   }
 
   /**
@@ -181,11 +208,32 @@ export const standardAstronomicalTimeScale = Object.freeze(new StandardAstronomi
 
 let registeredTimeScale: AstronomicalTimeScale = standardAstronomicalTimeScale;
 
+export type AstronomicalTimeScaleChangeListener = (timeScale: AstronomicalTimeScale) => void;
+const changeListeners: AstronomicalTimeScaleChangeListener[] = [];
+
+/**
+ * Subscribes to changes in the active astronomical time scale provider.
+ */
+export function onAstronomicalTimeScaleChange(
+  listener: AstronomicalTimeScaleChangeListener
+): () => void {
+  changeListeners.push(listener);
+  return () => {
+    const idx = changeListeners.indexOf(listener);
+    if (idx >= 0) {
+      changeListeners.splice(idx, 1);
+    }
+  };
+}
+
 /**
  * Registers an active astronomical time scale provider.
  */
 export function registerAstronomicalTimeScale(provider: AstronomicalTimeScale | null): void {
   registeredTimeScale = provider ?? standardAstronomicalTimeScale;
+  for (const listener of changeListeners) {
+    listener(registeredTimeScale);
+  }
 }
 
 /**

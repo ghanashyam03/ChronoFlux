@@ -144,7 +144,9 @@ export class Instant {
         `epochNanoseconds ${epochNanoseconds} exceeds supported range [${MIN_EPOCH_NANOSECONDS}, ${MAX_EPOCH_NANOSECONDS}]`
       );
     }
-    Object.freeze(this);
+    if (new.target === Instant) {
+      Object.freeze(this);
+    }
   }
 
   // --- Static Sentinel Constants ---

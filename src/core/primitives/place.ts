@@ -18,6 +18,15 @@ export interface PlaceOptions {
 
   /**
    * Height above the WGS84 reference ellipsoid in meters.
+   *
+   * Elevation Semantics in Solar Calculations:
+   * When specified and > 0, elevationMeters incorporates geometric horizon dip above an unobstructed
+   * sea-level horizon: d_dip = (1.76 / 60) * sqrt(elevationMeters) degrees.
+   * This causes sunrise to occur earlier and sunset later for elevated observers.
+   *
+   * Note: This assumes an unobstructed sea-level horizon and does NOT model local terrain
+   * (mountains, valleys) or architectural obstructions (buildings), which require separate
+   * topographical obstruction / viewshed models.
    */
   readonly elevationMeters?: number;
 

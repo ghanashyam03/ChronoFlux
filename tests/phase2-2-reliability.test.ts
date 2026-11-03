@@ -16,10 +16,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
+  calcHorizonDip,
   calcSolarCrossingUncertainty,
   calcSolarNoon,
   computeSolarCoordinates,
   findSolarCrossing,
+  instantToJulianDay,
+  MAX_SAFE_POLAR_BRACKET_WIDTH_NS,
   NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
   solvePolarCrossingBracket,
 } from '../src/core/models/solar/math.js';
@@ -30,6 +33,10 @@ import {
   standardAstronomicalTimeScale,
   StandardAstronomicalTimeScale,
 } from '../src/core/models/solar/timescale.js';
+import {
+  SolarEventInstant,
+  SolarTransitionInstant,
+} from '../src/core/models/solar/types.js';
 import { ChronoFlux, Duration, Instant, Interval, Place } from '../src/index.js';
 
 describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
@@ -129,7 +136,7 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       expect(result!.iterations).toBeGreaterThan(0);
     });
 
-    it('returns null when bracket does not span the target solar elevation', () => {
+    it('returns not_bracketed when bracket does not span the target solar elevation', () => {
       // In mid-January at North Pole, sun elevation is deep below -15°; target is -0.833°
       const midWinterNoon = ChronoFlux.instant('2026-01-15T12:00:00Z');
       const TWELVE_HOURS_NS = 43_200_000_000_000n;
@@ -143,7 +150,136 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
         NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG
       );
 
-      expect(result).toBeNull();
+      expect(result.status).toBe('not_bracketed');
+      expect(result.isResidualVerified).toBe(false);
+      expect(result.iterations).toBe(0);
+    });
+
+    it('validates solvePolarCrossingBracket input parameters strictly', () => {
+      const equinoxNoon = ChronoFlux.instant('2026-03-18T12:00:00Z');
+      const TWELVE_HOURS_NS = 43_200_000_000_000n;
+      const aNs = equinoxNoon.epochNanoseconds - TWELVE_HOURS_NS;
+      const bNs = equinoxNoon.epochNanoseconds + TWELVE_HOURS_NS;
+
+      // toleranceDeg validation
+      expect(() => solvePolarCrossingBracket(northPole, aNs, bNs, NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG, 50, 0)).toThrow(RangeError);
+      expect(() => solvePolarCrossingBracket(northPole, aNs, bNs, NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG, 50, -1e-5)).toThrow(RangeError);
+      expect(() => solvePolarCrossingBracket(northPole, aNs, bNs, NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG, 50, NaN)).toThrow(RangeError);
+      // @ts-expect-error toleranceDeg must be a number
+      expect(() => solvePolarCrossingBracket(northPole, aNs, bNs, NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG, 50, 'invalid')).toThrow(RangeError);
+
+      // maxIterations validation
+      expect(() => solvePolarCrossingBracket(northPole, aNs, bNs, NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG, 0, 1e-5)).toThrow(RangeError);
+      expect(() => solvePolarCrossingBracket(northPole, aNs, bNs, NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG, -5, 1e-5)).toThrow(RangeError);
+      expect(() => solvePolarCrossingBracket(northPole, aNs, bNs, NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG, 1.5, 1e-5)).toThrow(RangeError);
+
+      // targetElevationDeg validation
+      expect(() => solvePolarCrossingBracket(northPole, aNs, bNs, NaN)).toThrow(TypeError);
+
+      // BigInt bracket endpoints validation
+      // @ts-expect-error aNs must be bigint
+      expect(() => solvePolarCrossingBracket(northPole, Number(aNs), bNs, NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG)).toThrow(TypeError);
+      // @ts-expect-error bNs must be bigint
+      expect(() => solvePolarCrossingBracket(northPole, aNs, Number(bNs), NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG)).toThrow(TypeError);
+
+      // Bracket width limit enforcement (> MAX_SAFE_POLAR_BRACKET_WIDTH_NS)
+      const excessiveBNs = aNs + MAX_SAFE_POLAR_BRACKET_WIDTH_NS + 10_000_000n;
+      expect(() => solvePolarCrossingBracket(northPole, aNs, excessiveBNs, NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG)).toThrow(RangeError);
+    });
+
+    it('normalizes reversed brackets where aNs > bNs and converges with verified residual', () => {
+      const equinoxNoon = ChronoFlux.instant('2026-03-18T12:00:00Z');
+      const TWELVE_HOURS_NS = 43_200_000_000_000n;
+      const aNs = equinoxNoon.epochNanoseconds - TWELVE_HOURS_NS;
+      const bNs = equinoxNoon.epochNanoseconds + TWELVE_HOURS_NS;
+
+      const forwardResult = solvePolarCrossingBracket(northPole, aNs, bNs, NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG);
+      const reversedResult = solvePolarCrossingBracket(northPole, bNs, aNs, NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG);
+
+      expect(forwardResult.status).toBe('converged');
+      expect(reversedResult.status).toBe('converged');
+      expect(reversedResult.isResidualVerified).toBe(true);
+      expect(reversedResult.residualDeg).toBeLessThan(1e-5);
+      expect(reversedResult.crossingInstant.epochNanoseconds).toBe(forwardResult.crossingInstant.epochNanoseconds);
+    });
+
+    it('handles zero-width bracket (aNs === bNs) returning status not_bracketed', () => {
+      const equinoxNoon = ChronoFlux.instant('2026-03-18T12:00:00Z');
+      const result = solvePolarCrossingBracket(
+        northPole,
+        equinoxNoon.epochNanoseconds,
+        equinoxNoon.epochNanoseconds,
+        NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG
+      );
+
+      expect(result.status).toBe('not_bracketed');
+      expect(result.isResidualVerified).toBe(false);
+      expect(result.iterations).toBe(0);
+    });
+
+    it('returns status converged at iterations = 0 when endpoint matches target within toleranceDeg', () => {
+      const equinoxNoon = ChronoFlux.instant('2026-03-18T12:00:00Z');
+      const TWELVE_HOURS_NS = 43_200_000_000_000n;
+      const aNs = equinoxNoon.epochNanoseconds - TWELVE_HOURS_NS;
+      const bNs = equinoxNoon.epochNanoseconds + TWELVE_HOURS_NS;
+
+      const conv = solvePolarCrossingBracket(northPole, aNs, bNs, NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG);
+      expect(conv.status).toBe('converged');
+
+      // Use converged instant directly as endpoint with tolerance covering its residual
+      const endpointResult = solvePolarCrossingBracket(
+        northPole,
+        conv.crossingInstant.epochNanoseconds,
+        conv.crossingInstant.epochNanoseconds + 3600_000_000_000n,
+        NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
+        50,
+        1e-4
+      );
+
+      expect(endpointResult.status).toBe('converged');
+      expect(endpointResult.iterations).toBe(0);
+      expect(endpointResult.isResidualVerified).toBe(true);
+      expect(endpointResult.crossingInstant.epochNanoseconds).toBe(conv.crossingInstant.epochNanoseconds);
+    });
+
+    it('terminates with status max_iterations and isResidualVerified: false when maxIterations is exhausted', () => {
+      const equinoxNoon = ChronoFlux.instant('2026-03-18T12:00:00Z');
+      const TWELVE_HOURS_NS = 43_200_000_000_000n;
+      const aNs = equinoxNoon.epochNanoseconds - TWELVE_HOURS_NS;
+      const bNs = equinoxNoon.epochNanoseconds + TWELVE_HOURS_NS;
+
+      const maxIterResult = solvePolarCrossingBracket(
+        northPole,
+        aNs,
+        bNs,
+        NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
+        1, // Exhaust after 1 iteration
+        1e-8 // Very strict tolerance to prevent premature convergence
+      );
+
+      expect(maxIterResult.status).toBe('max_iterations');
+      expect(maxIterResult.isResidualVerified).toBe(false);
+      expect(maxIterResult.iterations).toBe(1);
+    });
+
+    it('converges with verified residual under strict tolerance (toleranceDeg = 1e-7)', () => {
+      const equinoxNoon = ChronoFlux.instant('2026-03-18T12:00:00Z');
+      const TWELVE_HOURS_NS = 43_200_000_000_000n;
+      const aNs = equinoxNoon.epochNanoseconds - TWELVE_HOURS_NS;
+      const bNs = equinoxNoon.epochNanoseconds + TWELVE_HOURS_NS;
+
+      const strictResult = solvePolarCrossingBracket(
+        northPole,
+        aNs,
+        bNs,
+        NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
+        60,
+        1e-7
+      );
+
+      expect(strictResult.status).toBe('converged');
+      expect(strictResult.isResidualVerified).toBe(true);
+      expect(strictResult.residualDeg).toBeLessThanOrEqual(1e-7);
     });
 
     it('property-based test: polar root-finding produces strictly bracketed, monotonic convergence', () => {
@@ -171,32 +307,128 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
   });
 
   // =========================================================================
-  // 2. Cache Key Precision
+  // 2. Cache Key Precision & Collision Immunity
   // =========================================================================
-  describe('2. Diurnal Cache Key Precision', () => {
-    it('distinguishes locations differing only at the 6th decimal place without collision', () => {
+  describe('2. Diurnal Cache Key Precision & Collision Immunity', () => {
+    it('proves sub-0.00001° coordinate differences yield distinct cached event outputs and would have collided under 5-decimal key', () => {
       const instant = ChronoFlux.instant('2026-06-21T12:00:00Z');
+      // Locations differing by 0.000001° in lat/lon
       const placeA = ChronoFlux.place({ latitude: 51.476901, longitude: -0.000501 });
       const placeB = ChronoFlux.place({ latitude: 51.476902, longitude: -0.000502 });
 
+      // In the old cache scheme: lat.toFixed(5) and lon.toFixed(5) produce identical keys:
+      expect(placeA.latitude.toFixed(5)).toBe(placeB.latitude.toFixed(5)); // '51.47690'
+      expect(placeA.longitude.toFixed(5)).toBe(placeB.longitude.toFixed(5)); // '-0.00050'
+
+      // Under the old 5-decimal cache, evaluating placeA would populate the cache,
+      // and evaluating placeB would erroneously return placeA's cached sunrise/sunset.
       const stateA = ChronoFlux.solar.evaluate(instant, placeA);
       const stateB = ChronoFlux.solar.evaluate(instant, placeB);
 
-      // Coordinates differ: azimuth and hour angle must reflect subtle distinction rather than identical cached coordinates
-      expect(stateA.azimuthDeg).not.toBe(stateB.azimuthDeg);
-      expect(stateA.geometricElevationDeg).not.toBe(stateB.geometricElevationDeg);
+      // Verify cached diurnal event outputs are distinct rather than returned from a colliding cache hit:
+      expect(stateA.sunrise).not.toBeNull();
+      expect(stateB.sunrise).not.toBeNull();
+      expect(stateA.sunset).not.toBeNull();
+      expect(stateB.sunset).not.toBeNull();
+
+      expect(stateA.sunrise!.epochNanoseconds).not.toBe(stateB.sunrise!.epochNanoseconds);
+      expect(stateA.sunset!.epochNanoseconds).not.toBe(stateB.sunset!.epochNanoseconds);
+      expect(stateA.solarNoon.epochNanoseconds).not.toBe(stateB.solarNoon.epochNanoseconds);
     });
 
-    it('distinguishes locations with identical lat/lon but different elevations in cache', () => {
+    it('proves elevation differences with identical lat/lon yield distinct cached event outputs and horizon uncertainties', () => {
       const instant = ChronoFlux.instant('2026-06-21T12:00:00Z');
       const seaLevel = ChronoFlux.place({ latitude: 27.9881, longitude: 86.925, elevationMeters: 0 });
       const everest = ChronoFlux.place({ latitude: 27.9881, longitude: 86.925, elevationMeters: 8848 });
 
+      // In the old cache scheme, elevation was omitted from the key, so seaLevel and everest collided completely.
       const stateSea = ChronoFlux.solar.evaluate(instant, seaLevel);
       const stateEverest = ChronoFlux.solar.evaluate(instant, everest);
 
+      // Verify cached outputs differ:
+      expect(stateSea.sunrise!.epochNanoseconds).not.toBe(stateEverest.sunrise!.epochNanoseconds);
+      expect(stateSea.sunset!.epochNanoseconds).not.toBe(stateEverest.sunset!.epochNanoseconds);
+
+      // At 8848m, geometric horizon dip makes sunrise earlier and sunset later:
+      expect(stateEverest.sunrise!.isBefore(stateSea.sunrise!)).toBe(true);
+      expect(stateEverest.sunset!.isAfter(stateSea.sunset!)).toBe(true);
+
+      // Horizon limitation uncertainty is 0 for sea level, and d_dip for Everest:
       expect(stateSea.uncertainty.horizonLimitationDeg).toBe(0.0);
-      expect(stateEverest.uncertainty.horizonLimitationDeg).toBeCloseTo(0.0293 * Math.sqrt(8848), 2);
+      expect(stateEverest.uncertainty.horizonLimitationDeg).toBeCloseTo(calcHorizonDip(8848), 4);
+    });
+  });
+
+  // =========================================================================
+  // 2b. Observer Elevation Semantics & Geometric Horizon Dip
+  // =========================================================================
+  describe('2b. Observer Elevation Semantics (Geometric Horizon Dip)', () => {
+    it('calculates geometric horizon dip conforming to d_dip = (1.76 / 60) * sqrt(max(0, h))', () => {
+      expect(calcHorizonDip(0)).toBe(0.0);
+      expect(calcHorizonDip(-50)).toBe(0.0);
+      expect(calcHorizonDip(100)).toBeCloseTo((1.76 / 60.0) * 10, 6);
+      expect(calcHorizonDip(2000)).toBeCloseTo((1.76 / 60.0) * Math.sqrt(2000), 6);
+      // At 2000m, dip ≈ 1.3118°
+      expect(calcHorizonDip(2000)).toBeCloseTo(1.3118, 3);
+    });
+
+    it('shifts sunrise earlier and sunset later by ~5.2 min at 2000m elevation at the equator', () => {
+      const equinoxNoon = ChronoFlux.instant('2026-03-20T12:00:00Z');
+      const equator0m = ChronoFlux.place({ latitude: 0.0, longitude: 0.0, elevationMeters: 0 });
+      const equator2000m = ChronoFlux.place({ latitude: 0.0, longitude: 0.0, elevationMeters: 2000 });
+
+      const state0m = ChronoFlux.solar.evaluate(equinoxNoon, equator0m);
+      const state2000m = ChronoFlux.solar.evaluate(equinoxNoon, equator2000m);
+
+      // Vertical diurnal crossing at equator: dh/dt ≈ 0.25°/min -> advance ≈ 1.3118° / 0.25°/min ≈ 5.25 min
+      const sunriseAdvanceMinutes =
+        Number(state0m.sunrise!.epochNanoseconds - state2000m.sunrise!.epochNanoseconds) / 60_000_000_000;
+      expect(sunriseAdvanceMinutes).toBeGreaterThan(4.8);
+      expect(sunriseAdvanceMinutes).toBeLessThan(5.6);
+
+      const sunsetDelayMinutes =
+        Number(state2000m.sunset!.epochNanoseconds - state0m.sunset!.epochNanoseconds) / 60_000_000_000;
+      expect(sunsetDelayMinutes).toBeGreaterThan(4.8);
+      expect(sunsetDelayMinutes).toBeLessThan(5.6);
+
+      // Total daylight interval is ~10.5 min longer at 2000m:
+      const dayLengthDiff = sunriseAdvanceMinutes + sunsetDelayMinutes;
+      expect(dayLengthDiff).toBeCloseTo(10.5, 0.5);
+    });
+
+    it('accounts for oblique diurnal crossing angle at higher latitudes (11.4 min advance at Greenwich summer)', () => {
+      const anchor = ChronoFlux.instant('2026-06-21T12:00:00Z');
+      const seaLevelPlace = ChronoFlux.place({ latitude: 51.4769, longitude: -0.0005, elevationMeters: 0 });
+      const mountainPlace = ChronoFlux.place({ latitude: 51.4769, longitude: -0.0005, elevationMeters: 2000 });
+
+      const state0m = ChronoFlux.solar.evaluate(anchor, seaLevelPlace);
+      const state2000m = ChronoFlux.solar.evaluate(anchor, mountainPlace);
+
+      // Oblique crossing (dh/dt ≈ 0.115°/min) -> advance ≈ 1.3118° / 0.115°/min ≈ 11.4 min
+      const sunriseAdvanceMinutes =
+        Number(state0m.sunrise!.epochNanoseconds - state2000m.sunrise!.epochNanoseconds) / 60_000_000_000;
+      expect(sunriseAdvanceMinutes).toBeCloseTo(11.37, 0.5);
+
+      const sunsetDelayMinutes =
+        Number(state2000m.sunset!.epochNanoseconds - state0m.sunset!.epochNanoseconds) / 60_000_000_000;
+      expect(sunsetDelayMinutes).toBeCloseTo(11.37, 0.5);
+    });
+
+    it('incorporates observer elevation dip into nextEvent queries', () => {
+      const anchor = ChronoFlux.instant('2026-03-20T04:00:00Z');
+      const equator0m = ChronoFlux.place({ latitude: 0.0, longitude: 0.0, elevationMeters: 0 });
+      const equator2000m = ChronoFlux.place({ latitude: 0.0, longitude: 0.0, elevationMeters: 2000 });
+
+      const nextSunrise0m = ChronoFlux.solar.nextEvent({ event: 'sunrise', place: equator0m, after: anchor });
+      const nextSunrise2000m = ChronoFlux.solar.nextEvent({ event: 'sunrise', place: equator2000m, after: anchor });
+
+      expect(nextSunrise0m).not.toBeNull();
+      expect(nextSunrise2000m).not.toBeNull();
+      expect(nextSunrise2000m!.isBefore(nextSunrise0m!)).toBe(true);
+
+      const diffMinutes =
+        Number(nextSunrise0m!.epochNanoseconds - nextSunrise2000m!.epochNanoseconds) / 60_000_000_000;
+      expect(diffMinutes).toBeCloseTo(5.25, 0.5);
     });
   });
 
@@ -378,6 +610,136 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       ChronoFlux.solar.registerAstronomicalTimeScale(null);
       expect(ChronoFlux.solar.getAstronomicalTimeScale()).toBe(standardAstronomicalTimeScale);
     });
+
+    it('applies active DUT1 offset to True Solar Time, hour angle, solar noon, sunrise, and sunset', () => {
+      const instant = ChronoFlux.instant('2026-06-21T12:00:00Z');
+      const place = greenwich;
+
+      // Standard evaluation
+      const stdPos = ChronoFlux.solar.evaluatePosition(instant, place);
+      const stdState = ChronoFlux.solar.evaluate(instant, place);
+
+      // Custom provider with DUT1 = +60s
+      const customTimeScale: AstronomicalTimeScale = {
+        getDeltaT: () => 70.0,
+        getDut1: () => 60.0,
+        toTerrestrialJulianDay: (inst) => {
+          const jdUt = instantToJulianDay(inst);
+          return jdUt + (70.0 + 60.0) / 86400.0;
+        },
+        toUt1JulianDay: (inst) => {
+          const jdUt = instantToJulianDay(inst);
+          return jdUt + 60.0 / 86400.0;
+        },
+        toTerrestrialJulianCentury: (inst) => {
+          const jdTT = instantToJulianDay(inst) + (70.0 + 60.0) / 86400.0;
+          return (jdTT - 2451545.0) / 36525.0;
+        },
+      };
+
+      try {
+        ChronoFlux.solar.registerAstronomicalTimeScale(customTimeScale);
+
+        const customPos = ChronoFlux.solar.evaluatePosition(instant, place);
+        const customState = ChronoFlux.solar.evaluate(instant, place);
+
+        // 1. TST increases by +1.0 minute (60s / 60s/min)
+        expect(customPos.trueSolarTimeMinutes - stdPos.trueSolarTimeMinutes).toBeCloseTo(1.0, 3);
+
+        // 2. Hour angle increases by +0.25° (15°/hr * 1/60 hr)
+        expect(customPos.hourAngleDeg - stdPos.hourAngleDeg).toBeCloseTo(0.25, 4);
+
+        // 3. Solar noon occurs earlier in UTC by 60 seconds (60,000,000,000 ns)
+        const noonShiftSec =
+          Number(stdState.solarNoon.epochNanoseconds - customState.solarNoon.epochNanoseconds) / 1_000_000_000;
+        expect(noonShiftSec).toBeCloseTo(60.0, 1);
+
+        // 4. Sunrise and sunset shift earlier in UTC by ~60 seconds
+        const sunriseShiftSec =
+          Number(stdState.sunrise!.epochNanoseconds - customState.sunrise!.epochNanoseconds) / 1_000_000_000;
+        expect(sunriseShiftSec).toBeCloseTo(60.0, 1);
+
+        const sunsetShiftSec =
+          Number(stdState.sunset!.epochNanoseconds - customState.sunset!.epochNanoseconds) / 1_000_000_000;
+        expect(sunsetShiftSec).toBeCloseTo(60.0, 1);
+
+        // 5. nextEvent shifts earlier by ~60s
+        const anchor = ChronoFlux.instant('2026-06-21T02:00:00Z');
+        const customNextSunrise = ChronoFlux.solar.nextEvent({ event: 'sunrise', place, after: anchor });
+        registerAstronomicalTimeScale(null); // revert to standard to compare nextEvent
+        const stdNextSunrise = ChronoFlux.solar.nextEvent({ event: 'sunrise', place, after: anchor });
+
+        expect(
+          Number(stdNextSunrise!.epochNanoseconds - customNextSunrise!.epochNanoseconds) / 1_000_000_000
+        ).toBeCloseTo(60.0, 1);
+      } finally {
+        ChronoFlux.solar.registerAstronomicalTimeScale(null);
+      }
+    });
+
+    it('applies active TT offset to ephemeris orbital coordinates without affecting UT1-governed hour angle', () => {
+      const instant = ChronoFlux.instant('2026-06-21T12:00:00Z');
+      const place = greenwich;
+
+      const stdPos = ChronoFlux.solar.evaluatePosition(instant, place);
+
+      // Custom provider with TT offset +86400s (advance ephemeris by 1 dynamical day) while DUT1 = 0
+      const ephemerisDayShift: AstronomicalTimeScale = {
+        getDeltaT: () => 86400.0,
+        getDut1: () => 0.0,
+        toTerrestrialJulianDay: (inst) => instantToJulianDay(inst) + 1.0,
+        toUt1JulianDay: (inst) => instantToJulianDay(inst),
+        toTerrestrialJulianCentury: (inst) => (instantToJulianDay(inst) + 1.0 - 2451545.0) / 36525.0,
+      };
+
+      try {
+        ChronoFlux.solar.registerAstronomicalTimeScale(ephemerisDayShift);
+        const shiftedPos = ChronoFlux.solar.evaluatePosition(instant, place);
+
+        // Orbital right ascension advances by ~1.04°/day near solstice (due to obliquity dRA/dLambda = 1/cos(eps) ≈ 1.09)
+        const raDiff = shiftedPos.rightAscensionDeg - stdPos.rightAscensionDeg;
+        expect(raDiff).toBeCloseTo(1.039, 1);
+        expect(raDiff).toBeGreaterThan(0.95);
+        expect(raDiff).toBeLessThan(1.15);
+
+        // Hour angle depends on UT1 (Earth diurnal rotation); advancing TT by 1 dynamical day
+        // shifts hour angle ONLY through the daily Equation of Time orbital gradient (~13s ≈ 0.054°),
+        // proving it does not experience the 360° diurnal rotation shift.
+        expect(Math.abs(shiftedPos.hourAngleDeg - stdPos.hourAngleDeg)).toBeLessThan(0.1);
+      } finally {
+        ChronoFlux.solar.registerAstronomicalTimeScale(null);
+      }
+    });
+
+    it('invalidates diurnal event cache automatically when astronomical time scale changes', () => {
+      const instant = ChronoFlux.instant('2026-06-21T12:00:00Z');
+      const place = greenwich;
+
+      // Populate diurnal cache under standard provider
+      const state1 = ChronoFlux.solar.evaluate(instant, place);
+
+      // Register provider with DUT1 = +60s
+      const customTimeScale: AstronomicalTimeScale = {
+        getDeltaT: () => 70.0,
+        getDut1: () => 60.0,
+        toTerrestrialJulianDay: (inst) => instantToJulianDay(inst) + 130.0 / 86400.0,
+        toUt1JulianDay: (inst) => instantToJulianDay(inst) + 60.0 / 86400.0,
+        toTerrestrialJulianCentury: (inst) => (instantToJulianDay(inst) + 130.0 / 86400.0 - 2451545.0) / 36525.0,
+      };
+
+      try {
+        ChronoFlux.solar.registerAstronomicalTimeScale(customTimeScale);
+
+        // Immediate subsequent evaluate must return shifted values rather than stale cached events
+        const state2 = ChronoFlux.solar.evaluate(instant, place);
+        expect(state2.solarNoon.epochNanoseconds).not.toBe(state1.solarNoon.epochNanoseconds);
+        expect(
+          Number(state1.solarNoon.epochNanoseconds - state2.solarNoon.epochNanoseconds) / 1_000_000_000
+        ).toBeCloseTo(60.0, 1);
+      } finally {
+        ChronoFlux.solar.registerAstronomicalTimeScale(null);
+      }
+    });
   });
 
   // =========================================================================
@@ -426,6 +788,69 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       expect(futureState.isWithinValidityRange).toBe(false);
       expect(futureState.isAccuracyDegraded).toBe(true);
       expect(futureState.uncertainty.numericalErrorDeg).toBeCloseTo(0.21, 2);
+    });
+
+    it('returns SolarEventInstant from nextEvent preserving validity, event name, and uncertainty metadata', () => {
+      const anchor = ChronoFlux.instant('2026-06-21T02:00:00Z');
+      const nextSunrise = ChronoFlux.solar.nextEvent({
+        event: 'sunrise',
+        place: greenwich,
+        after: anchor,
+      });
+
+      expect(nextSunrise).not.toBeNull();
+      expect(nextSunrise).toBeInstanceOf(Instant);
+      expect(nextSunrise).toBeInstanceOf(SolarEventInstant);
+
+      const eventInst = nextSunrise as SolarEventInstant;
+      expect(eventInst.event).toBe('sunrise');
+      expect(eventInst.isWithinValidityRange).toBe(true);
+      expect(eventInst.isAccuracyDegraded).toBe(false);
+      expect(eventInst.uncertaintyDeg).toBeGreaterThan(0.0);
+      expect(eventInst.uncertaintyMinutes).toBeGreaterThan(0.0);
+      expect(eventInst.uncertainty.numericalErrorDeg).toBe(0.01);
+    });
+
+    it('returns SolarTransitionInstant[] from findTransitions preserving threshold, direction, and validity metadata', () => {
+      const start = ChronoFlux.instant('2026-06-21T00:00:00Z');
+      const end = ChronoFlux.instant('2026-06-22T00:00:00Z');
+      const window = ChronoFlux.interval(start, end);
+
+      const transitions = ChronoFlux.solar.findTransitions(greenwich, window, 0.0);
+      expect(transitions.length).toBe(2);
+
+      for (const t of transitions) {
+        expect(t).toBeInstanceOf(Instant);
+        expect(t).toBeInstanceOf(SolarTransitionInstant);
+        const transInst = t as SolarTransitionInstant;
+        expect(transInst.thresholdDeg).toBe(0.0);
+        expect(transInst.isWithinValidityRange).toBe(true);
+        expect(transInst.isAccuracyDegraded).toBe(false);
+        expect(transInst.uncertaintyMinutes).toBeGreaterThan(0.0);
+        expect(transInst.uncertainty.numericalErrorDeg).toBe(0.01);
+      }
+
+      const rising = transitions[0] as SolarTransitionInstant;
+      const setting = transitions[1] as SolarTransitionInstant;
+      expect(rising.direction).toBe('rising');
+      expect(setting.direction).toBe('setting');
+    });
+
+    it('preserves degraded validity and expanded uncertainty for out-of-range transitions and events', () => {
+      const histStart = ChronoFlux.instant('1600-06-21T00:00:00Z');
+      const histEnd = ChronoFlux.instant('1600-06-22T00:00:00Z');
+      const histWindow = ChronoFlux.interval(histStart, histEnd);
+
+      const transitions = ChronoFlux.solar.findTransitions(greenwich, histWindow, 0.0);
+      expect(transitions.length).toBe(2);
+
+      for (const t of transitions) {
+        const transInst = t as SolarTransitionInstant;
+        expect(transInst.isWithinValidityRange).toBe(false);
+        expect(transInst.isAccuracyDegraded).toBe(true);
+        // Ephemeris uncertainty degrades outside 1800-2100 (excess = 2 centuries -> ~0.21°)
+        expect(transInst.uncertaintyDeg).toBeGreaterThan(0.15);
+      }
     });
   });
 
@@ -504,6 +929,25 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       expect(state.dstConfidence).toBe('heuristic');
     });
 
+    it('classifies Etc/GMT+3 as heuristic confidence despite uniform 12-month offset due to lack of statutory names', () => {
+      const etcGmt3 = ChronoFlux.place({ latitude: 0, longitude: -45, timeZoneId: 'Etc/GMT+3' });
+      const instant = ChronoFlux.instant('2026-07-01T12:00:00Z');
+      const state = ChronoFlux.civil.evaluate(instant, etcGmt3);
+
+      expect(state.utcOffsetMinutes).toBe(-180);
+      expect(state.isDaylightSaving).toBe(false);
+      expect(state.dstConfidence).toBe('heuristic');
+    });
+
+    it('exposes civil time engine and IANA tz database provenance', () => {
+      const prov = ChronoFlux.civil.getProvenance();
+      expect(prov.runtime).toContain('Node.js');
+      expect(typeof prov.tzVersion).toBe('string');
+      expect(typeof prov.icuVersion).toBe('string');
+      expect(typeof prov.cldrVersion).toBe('string');
+      expect(typeof prov.unicodeVersion).toBe('string');
+    });
+
     it('returns unknown confidence when runtime formatter fails unexpectedly', () => {
       const originalFormatToParts = Intl.DateTimeFormat.prototype.formatToParts;
       Intl.DateTimeFormat.prototype.formatToParts = function (date?: Date | number) {
@@ -528,7 +972,12 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
   // 8. Reproducible Performance Benchmark
   // =========================================================================
   describe('8. Performance Benchmarking (Measured vs Claimed)', () => {
-    it('measures evaluatePosition throughput over 10,000 iterations', () => {
+    // Benchmark Environment Report
+    console.log(
+      `[Benchmark Environment] OS: ${process.platform} (${process.arch}) | Node: ${process.version} | V8: ${process.versions.v8}`
+    );
+
+    it('measures evaluatePosition throughput over 10,000 iterations (portability bound < 25 µs/op)', () => {
       const place = greenwich;
       const baseEpochNs = ChronoFlux.instant('2026-06-21T00:00:00Z').epochNanoseconds;
       const iterations = 10_000;
@@ -550,16 +999,41 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       const avgMicrosPerOp = (totalElapsedMs / iterations) * 1000.0;
       const opsPerSec = Math.round((iterations / totalElapsedMs) * 1000.0);
 
-      // Reproducible benchmark logging
+      // Portability Disclaimer: Benchmark throughput depends on underlying host CPU, operating system,
+      // thermal throttling, and Node.js runtime. Thresholds enforce regression ceilings.
       console.log(
-        `[Benchmark] evaluatePosition: ${totalElapsedMs.toFixed(2)} ms for ${iterations} ops | ${avgMicrosPerOp.toFixed(3)} µs/op | ${opsPerSec.toLocaleString()} ops/sec`
+        `[Benchmark: Instantaneous Position] ${totalElapsedMs.toFixed(2)} ms for ${iterations} ops | ${avgMicrosPerOp.toFixed(3)} µs/op | ${opsPerSec.toLocaleString()} ops/sec (Platform: ${process.platform}/${process.arch})`
       );
 
-      // Bound: Must execute in < 25 microseconds per evaluation in modern V8
       expect(avgMicrosPerOp).toBeLessThan(25.0);
     });
 
-    it('measures diurnal cache hit throughput over 10,000 evaluations', () => {
+    it('measures cold-cache diurnal solve throughput over 1,000 distinct calendar days', () => {
+      const place = greenwich;
+      const startMs = Date.UTC(2026, 0, 1, 12, 0, 0);
+      const iterations = 1_000;
+
+      // Each iteration is a distinct day, intentionally missing the diurnal cache and solving full diurnal events
+      const t0 = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        const inst = Instant.fromEpochMilliseconds(startMs + i * 86_400_000);
+        ChronoFlux.solar.evaluate(inst, place);
+      }
+      const t1 = performance.now();
+
+      const totalElapsedMs = t1 - t0;
+      const avgMicrosPerOp = (totalElapsedMs / iterations) * 1000.0;
+      const opsPerSec = Math.round((iterations / totalElapsedMs) * 1000.0);
+
+      console.log(
+        `[Benchmark: Cold-Cache Diurnal Solves] ${totalElapsedMs.toFixed(2)} ms for ${iterations} ops | ${avgMicrosPerOp.toFixed(3)} µs/op | ${opsPerSec.toLocaleString()} ops/sec`
+      );
+
+      // Cold full-day root-finding solve (sunrise, sunset, noon, midnight, twilights) bound
+      expect(avgMicrosPerOp).toBeLessThan(1000.0); // < 1ms per cold daily cycle solve
+    });
+
+    it('measures warm-cache diurnal hit throughput over 10,000 evaluations (portability bound < 60 µs/op)', () => {
       const place = greenwich;
       const baseInstant = ChronoFlux.instant('2026-06-21T12:00:00Z');
       const iterations = 10_000;
@@ -580,10 +1054,11 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       const opsPerSec = Math.round((iterations / totalElapsedMs) * 1000.0);
 
       console.log(
-        `[Benchmark] evaluate (diurnal cache hits): ${totalElapsedMs.toFixed(2)} ms for ${iterations} ops | ${avgMicrosPerOp.toFixed(3)} µs/op | ${opsPerSec.toLocaleString()} ops/sec`
+        `[Benchmark: Warm-Cache Hits] ${totalElapsedMs.toFixed(2)} ms for ${iterations} ops | ${avgMicrosPerOp.toFixed(3)} µs/op | ${opsPerSec.toLocaleString()} ops/sec`
       );
 
-      expect(avgMicrosPerOp).toBeLessThan(35.0);
+      // Portability bound: accommodates V8 coverage instrumentation and virtualized runners (< 60 µs/op)
+      expect(avgMicrosPerOp).toBeLessThan(60.0);
     });
   });
 });

@@ -7,6 +7,7 @@ import { Instant } from '../../primitives/instant.js';
 import { Place } from '../../primitives/place.js';
 import {
   ASTRONOMICAL_TWILIGHT_ELEVATION_DEG,
+  calcHorizonDip,
   calcSolarMidnight,
   calcSolarNoon,
   CIVIL_TWILIGHT_ELEVATION_DEG,
@@ -69,11 +70,14 @@ export function evaluatePolarRegime(place: Place, instant: Instant): PolarRegime
   const maxElevationDeg = coordsNoon.apparentElevationDeg;
   const minElevationDeg = coordsMidnight.apparentElevationDeg;
 
-  // Polar Day: geometric elevation never drops below nominal horizon (-0.8333°)
-  const isPolarDay = minGeometricElevationDeg >= DIRECT_SUNLIGHT_THRESHOLD_DEG;
+  const horizonDipDeg = calcHorizonDip(place.elevationMeters);
+  const thresholdDeg = DIRECT_SUNLIGHT_THRESHOLD_DEG - horizonDipDeg;
 
-  // Polar Night: geometric elevation never reaches nominal horizon (-0.8333°)
-  const isPolarNight = maxGeometricElevationDeg < DIRECT_SUNLIGHT_THRESHOLD_DEG;
+  // Polar Day: geometric elevation never drops below observer's dipped horizon
+  const isPolarDay = minGeometricElevationDeg >= thresholdDeg;
+
+  // Polar Night: geometric elevation never reaches observer's dipped horizon
+  const isPolarNight = maxGeometricElevationDeg < thresholdDeg;
   const polarRegime: PolarRegimeType = isPolarDay ? 'polar_day' : isPolarNight ? 'polar_night' : 'none';
 
   return {

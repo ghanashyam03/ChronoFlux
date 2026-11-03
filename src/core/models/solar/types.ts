@@ -356,3 +356,77 @@ export interface SolarEventOptions {
    */
   readonly searchLimitDays?: number;
 }
+
+/**
+ * High-precision solar event Instant preserving validity and accuracy metadata.
+ * Extends Instant so that callers may treat it as a standard Instant or inspect
+ * event-specific accuracy and validity attributes.
+ */
+export class SolarEventInstant extends Instant {
+  readonly event: SolarEventName;
+  readonly isWithinValidityRange: boolean;
+  readonly isAccuracyDegraded: boolean;
+  readonly uncertaintyDeg: number;
+  readonly uncertaintyMinutes: number;
+  readonly uncertainty: SolarUncertaintyDetails;
+
+  constructor(
+    epochNanoseconds: bigint,
+    metadata: {
+      event: SolarEventName;
+      isWithinValidityRange: boolean;
+      isAccuracyDegraded: boolean;
+      uncertaintyDeg: number;
+      uncertaintyMinutes: number;
+      uncertainty: SolarUncertaintyDetails;
+    }
+  ) {
+    super(epochNanoseconds);
+    this.event = metadata.event;
+    this.isWithinValidityRange = metadata.isWithinValidityRange;
+    this.isAccuracyDegraded = metadata.isAccuracyDegraded;
+    this.uncertaintyDeg = metadata.uncertaintyDeg;
+    this.uncertaintyMinutes = metadata.uncertaintyMinutes;
+    this.uncertainty = metadata.uncertainty;
+    Object.freeze(this);
+  }
+}
+
+/**
+ * High-precision threshold transition Instant preserving threshold angle,
+ * direction ('rising' | 'setting'), validity, and accuracy metadata.
+ * Extends Instant so that callers may treat it as a standard Instant.
+ */
+export class SolarTransitionInstant extends Instant {
+  readonly thresholdDeg: number;
+  readonly direction: 'rising' | 'setting';
+  readonly isWithinValidityRange: boolean;
+  readonly isAccuracyDegraded: boolean;
+  readonly uncertaintyDeg: number;
+  readonly uncertaintyMinutes: number;
+  readonly uncertainty: SolarUncertaintyDetails;
+
+  constructor(
+    epochNanoseconds: bigint,
+    metadata: {
+      thresholdDeg: number;
+      direction: 'rising' | 'setting';
+      isWithinValidityRange: boolean;
+      isAccuracyDegraded: boolean;
+      uncertaintyDeg: number;
+      uncertaintyMinutes: number;
+      uncertainty: SolarUncertaintyDetails;
+    }
+  ) {
+    super(epochNanoseconds);
+    this.thresholdDeg = metadata.thresholdDeg;
+    this.direction = metadata.direction;
+    this.isWithinValidityRange = metadata.isWithinValidityRange;
+    this.isAccuracyDegraded = metadata.isAccuracyDegraded;
+    this.uncertaintyDeg = metadata.uncertaintyDeg;
+    this.uncertaintyMinutes = metadata.uncertaintyMinutes;
+    this.uncertainty = metadata.uncertainty;
+    Object.freeze(this);
+  }
+}
+

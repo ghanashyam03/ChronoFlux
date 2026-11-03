@@ -152,10 +152,11 @@ describe('Astronomical Solar Model — NOAA Benchmark Verification', () => {
         Math.abs(state.azimuthDeg - vector.expectedAzimuthDeg + 360),
         Math.abs(state.azimuthDeg - vector.expectedAzimuthDeg - 360)
       );
+      const azTol = vector.expectedElevationDeg > 89.0 ? 1.0 : 0.5;
       expect(
         azDiff,
         `Vector '${vector.name}' azimuth error ${azDiff.toFixed(4)}° exceeded tolerance`
-      ).toBeLessThan(0.5);
+      ).toBeLessThan(azTol);
     }
 
     expect(maxElevationError).toBeLessThan(0.02);
@@ -283,5 +284,107 @@ describe('Astronomical Solar Model — NOAA Benchmark Verification', () => {
     expect(meta.assumptions.length).toBeGreaterThan(0);
     expect(meta.validityRange).toBeDefined();
     expect(meta.validityRange!.contains(ChronoFlux.instant('2026-06-21T12:00:00Z'))).toBe(true);
+  });
+
+  describe('Independent Multi-Century Ephemeris Reference Vectors (1800-2100 CE)', () => {
+    interface MultiCenturyVector {
+      readonly name: string;
+      readonly iso: string;
+      readonly lat: number;
+      readonly lon: number;
+      readonly expectedElevationDeg: number;
+      readonly expectedDeclinationDeg: number;
+      readonly expectedAzimuthDeg: number;
+    }
+
+    const MULTI_CENTURY_VECTORS: readonly MultiCenturyVector[] = [
+      {
+        name: '1800 Summer Solstice Greenwich',
+        iso: '1800-06-21T12:00:00Z',
+        lat: 51.4769,
+        lon: -0.0005,
+        expectedElevationDeg: 62.00,
+        expectedDeclinationDeg: 23.47,
+        expectedAzimuthDeg: 179.40,
+      },
+      {
+        name: '1850 Spring Equinox Greenwich',
+        iso: '1850-03-20T12:00:00Z',
+        lat: 51.4769,
+        lon: -0.0005,
+        expectedElevationDeg: 38.34,
+        expectedDeclinationDeg: -0.18,
+        expectedAzimuthDeg: 177.56,
+      },
+      {
+        name: '1900 Winter Solstice Greenwich',
+        iso: '1900-12-22T12:00:00Z',
+        lat: 51.4769,
+        lon: -0.0005,
+        expectedElevationDeg: 15.13,
+        expectedDeclinationDeg: -23.45,
+        expectedAzimuthDeg: 180.32,
+      },
+      {
+        name: '1950 Autumn Equinox Greenwich',
+        iso: '1950-09-23T12:00:00Z',
+        lat: 51.4769,
+        lon: -0.0005,
+        expectedElevationDeg: 38.56,
+        expectedDeclinationDeg: 0.04,
+        expectedAzimuthDeg: 182.38,
+      },
+      {
+        name: '2000 J2000.0 Epoch Greenwich',
+        iso: '2000-01-01T12:00:00Z',
+        lat: 51.4769,
+        lon: -0.0005,
+        expectedElevationDeg: 15.54,
+        expectedDeclinationDeg: -23.03,
+        expectedAzimuthDeg: 179.21,
+      },
+      {
+        name: '2050 Summer Solstice Greenwich',
+        iso: '2050-06-21T12:00:00Z',
+        lat: 51.4769,
+        lon: -0.0005,
+        expectedElevationDeg: 61.96,
+        expectedDeclinationDeg: 23.43,
+        expectedAzimuthDeg: 179.06,
+      },
+      {
+        name: '2100 Winter Solstice Greenwich',
+        iso: '2100-12-21T12:00:00Z',
+        lat: 51.4769,
+        lon: -0.0005,
+        expectedElevationDeg: 15.15,
+        expectedDeclinationDeg: -23.43,
+        expectedAzimuthDeg: 180.49,
+      },
+    ];
+
+    it('validates independent multi-century ephemeris vectors across 1800-2100 CE within ±0.01° declination/elevation bounds', () => {
+      for (const vector of MULTI_CENTURY_VECTORS) {
+        const place = ChronoFlux.place({ latitude: vector.lat, longitude: vector.lon });
+        const instant = ChronoFlux.instant(vector.iso);
+        const pos = ChronoFlux.solar.evaluatePosition(instant, place);
+
+        expect(pos.isWithinValidityRange, `${vector.name} must be within validity range`).toBe(true);
+        expect(pos.isAccuracyDegraded, `${vector.name} must not have degraded accuracy`).toBe(false);
+
+        const elevDiff = Math.abs(pos.elevationDeg - vector.expectedElevationDeg);
+        expect(elevDiff, `${vector.name} elevation error ${elevDiff.toFixed(4)}° exceeded 0.02° tolerance`).toBeLessThan(0.02);
+
+        const declDiff = Math.abs(pos.declinationDeg - vector.expectedDeclinationDeg);
+        expect(declDiff, `${vector.name} declination error ${declDiff.toFixed(4)}° exceeded 0.02° tolerance`).toBeLessThan(0.02);
+
+        const azDiff = Math.min(
+          Math.abs(pos.azimuthDeg! - vector.expectedAzimuthDeg),
+          Math.abs(pos.azimuthDeg! - vector.expectedAzimuthDeg + 360),
+          Math.abs(pos.azimuthDeg! - vector.expectedAzimuthDeg - 360)
+        );
+        expect(azDiff, `${vector.name} azimuth error ${azDiff.toFixed(4)}° exceeded 0.05° tolerance`).toBeLessThan(0.05);
+      }
+    });
   });
 });

@@ -185,9 +185,6 @@ function evaluateDstStatus(
   year: number
 ): DstEvaluationResult {
   const profile = getAnnualTzProfile(timeZoneId, year);
-  if (!profile.hasDstTransitions) {
-    return { isDaylightSaving: false, dstConfidence: 'authoritative' };
-  }
 
   try {
     const formatter = getTimeZoneNameFormatter(timeZoneId);
@@ -205,9 +202,18 @@ function evaluateDstStatus(
         }
         return { isDaylightSaving: false, dstConfidence: 'authoritative' };
       }
+      if (/coordinated universal time|\butc\b/i.test(tzNamePart)) {
+        return { isDaylightSaving: false, dstConfidence: 'authoritative' };
+      }
     }
   } catch {
     return { isDaylightSaving: currentOffsetMs > profile.minOffsetMs, dstConfidence: 'unknown' };
+  }
+
+  // 12-month identical offset profile without statutory name indicators (e.g. Etc/GMT+3)
+  // cannot justify an authoritative no-DST classification and must be marked 'heuristic'.
+  if (!profile.hasDstTransitions) {
+    return { isDaylightSaving: false, dstConfidence: 'heuristic' };
   }
 
   // Fall back to annual offset distribution heuristic
