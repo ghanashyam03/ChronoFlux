@@ -334,9 +334,40 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       expect(stateA.sunrise!.epochNanoseconds).not.toBe(stateB.sunrise!.epochNanoseconds);
       expect(stateA.sunset!.epochNanoseconds).not.toBe(stateB.sunset!.epochNanoseconds);
       expect(stateA.solarNoon.epochNanoseconds).not.toBe(stateB.solarNoon.epochNanoseconds);
+
+      // Verify cached event uncertainties are distinct:
+      expect(stateA.uncertainty.sunriseUncertaintyMinutes).not.toBeNull();
+      expect(stateB.uncertainty.sunriseUncertaintyMinutes).not.toBeNull();
+      expect(stateA.uncertainty.sunriseUncertaintyMinutes).not.toBe(stateB.uncertainty.sunriseUncertaintyMinutes);
     });
 
-    it('proves elevation differences with identical lat/lon yield distinct cached event outputs and horizon uncertainties', () => {
+    it('proves sub-0.00001° coordinate differences at polar circle boundary yield distinct cached polarRegime and would have collided under 5-decimal key', () => {
+      const instant = ChronoFlux.instant('2026-06-21T12:00:00Z');
+      // Near solstice polar circle boundary:
+      const placePolarDay = ChronoFlux.place({ latitude: 65.7289459, longitude: 0.0 });
+      const placeNone = ChronoFlux.place({ latitude: 65.7289454, longitude: 0.0 });
+
+      // In the old cache scheme, toFixed(5) produces identical keys for both:
+      expect(placePolarDay.latitude.toFixed(5)).toBe('65.72895');
+      expect(placeNone.latitude.toFixed(5)).toBe('65.72895');
+
+      const statePolarDay = ChronoFlux.solar.evaluate(instant, placePolarDay);
+      const stateNone = ChronoFlux.solar.evaluate(instant, placeNone);
+
+      // Verify cached polar regimes and event presence are distinct:
+      expect(statePolarDay.polarRegime).toBe('polar_day');
+      expect(statePolarDay.isPolarDay).toBe(true);
+      expect(statePolarDay.sunrise).toBeNull();
+      expect(statePolarDay.sunset).toBeNull();
+
+      expect(stateNone.polarRegime).toBe('none');
+      expect(stateNone.isPolarDay).toBe(false);
+      expect(stateNone.sunrise).not.toBeNull();
+      expect(stateNone.sunset).not.toBeNull();
+      expect(stateNone.uncertainty.sunriseUncertaintyMinutes).not.toBeNull();
+    });
+
+    it('proves elevation differences with identical lat/lon yield distinct cached event outputs, polar regimes, and horizon uncertainties', () => {
       const instant = ChronoFlux.instant('2026-06-21T12:00:00Z');
       const seaLevel = ChronoFlux.place({ latitude: 27.9881, longitude: 86.925, elevationMeters: 0 });
       const everest = ChronoFlux.place({ latitude: 27.9881, longitude: 86.925, elevationMeters: 8848 });
@@ -356,6 +387,22 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       // Horizon limitation uncertainty is 0 for sea level, and d_dip for Everest:
       expect(stateSea.uncertainty.horizonLimitationDeg).toBe(0.0);
       expect(stateEverest.uncertainty.horizonLimitationDeg).toBeCloseTo(calcHorizonDip(8848), 4);
+
+      // Verify elevation differences yield distinct cached polar regimes at high latitudes:
+      const seaArctic = ChronoFlux.place({ latitude: 65.0, longitude: 0.0, elevationMeters: 0 });
+      const mtnArctic = ChronoFlux.place({ latitude: 65.0, longitude: 0.0, elevationMeters: 3000 });
+
+      const stateSeaArctic = ChronoFlux.solar.evaluate(instant, seaArctic);
+      const stateMtnArctic = ChronoFlux.solar.evaluate(instant, mtnArctic);
+
+      expect(stateSeaArctic.polarRegime).toBe('none');
+      expect(stateSeaArctic.sunrise).not.toBeNull();
+      expect(stateSeaArctic.sunset).not.toBeNull();
+
+      expect(stateMtnArctic.polarRegime).toBe('polar_day');
+      expect(stateMtnArctic.isPolarDay).toBe(true);
+      expect(stateMtnArctic.sunrise).toBeNull();
+      expect(stateMtnArctic.sunset).toBeNull();
     });
   });
 
@@ -429,6 +476,26 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
       const diffMinutes =
         Number(nextSunrise0m!.epochNanoseconds - nextSunrise2000m!.epochNanoseconds) / 60_000_000_000;
       expect(diffMinutes).toBeCloseTo(5.25, 0.5);
+    });
+
+    it('harmonizes phase classification with isDirectSunlight for elevated observers above dipped horizon', () => {
+      // Equator at 2000m (horizon dip = 1.3118° -> sunrise occurs at geometric elevation -2.1451°)
+      const equator2000m = ChronoFlux.place({ latitude: 0.0, longitude: 0.0, elevationMeters: 2000 });
+      const sunrise = ChronoFlux.solar.nextEvent({
+        event: 'sunrise',
+        place: equator2000m,
+        after: ChronoFlux.instant('2026-03-20T04:00:00Z'),
+      })!;
+
+      // 1 minute after sunrise: sun is visibly above dipped horizon, but still below nominal 0m horizon (-0.8333°)
+      const justAfterSunrise = sunrise.add(Duration.fromMinutes(1));
+      const pos = ChronoFlux.solar.evaluatePosition(justAfterSunrise, equator2000m);
+      const state = ChronoFlux.solar.evaluate(justAfterSunrise, equator2000m);
+
+      expect(pos.isDirectSunlight).toBe(true);
+      expect(pos.phase).toBe('day');
+      expect(state.isDirectSunlight).toBe(true);
+      expect(state.phase).toBe('day');
     });
   });
 
@@ -672,6 +739,22 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
         expect(
           Number(stdNextSunrise!.epochNanoseconds - customNextSunrise!.epochNanoseconds) / 1_000_000_000
         ).toBeCloseTo(60.0, 1);
+
+        // 6. findTransitions shifts earlier by ~60s
+        const window = ChronoFlux.interval(
+          ChronoFlux.instant('2026-06-21T00:00:00Z'),
+          ChronoFlux.instant('2026-06-22T00:00:00Z')
+        );
+        ChronoFlux.solar.registerAstronomicalTimeScale(customTimeScale);
+        const customTransitions = ChronoFlux.solar.findTransitions(place, window, 0.0);
+        registerAstronomicalTimeScale(null);
+        const stdTransitions = ChronoFlux.solar.findTransitions(place, window, 0.0);
+
+        expect(customTransitions.length).toBe(2);
+        expect(stdTransitions.length).toBe(2);
+        const transShiftSec =
+          Number(stdTransitions[0]!.epochNanoseconds - customTransitions[0]!.epochNanoseconds) / 1_000_000_000;
+        expect(transShiftSec).toBeCloseTo(60.0, 1);
       } finally {
         ChronoFlux.solar.registerAstronomicalTimeScale(null);
       }
@@ -851,6 +934,42 @@ describe('Phase 2.2 — Numerical Reliability and Temporal Semantics', () => {
         // Ephemeris uncertainty degrades outside 1800-2100 (excess = 2 centuries -> ~0.21°)
         expect(transInst.uncertaintyDeg).toBeGreaterThan(0.15);
       }
+    });
+
+    it('preserves validity and accuracy metadata on evaluate() and diurnal cycle event properties', () => {
+      const instant = ChronoFlux.instant('2026-06-21T12:00:00Z');
+      const state = ChronoFlux.solar.evaluate(instant, greenwich);
+
+      expect(state.solarNoon).toBeInstanceOf(SolarEventInstant);
+      expect(state.solarNoon.event).toBe('solarNoon');
+      expect(state.solarNoon.isWithinValidityRange).toBe(true);
+      expect(state.solarNoon.isAccuracyDegraded).toBe(false);
+      expect(state.solarNoon.uncertaintyDeg).toBeGreaterThan(0.0);
+      expect(state.solarNoon.uncertaintyMinutes).toBeGreaterThan(0.0);
+
+      expect(state.solarMidnight).toBeInstanceOf(SolarEventInstant);
+      expect(state.solarMidnight.event).toBe('solarMidnight');
+      expect(state.solarMidnight.isWithinValidityRange).toBe(true);
+
+      expect(state.sunrise).toBeInstanceOf(SolarEventInstant);
+      expect(state.sunrise!.event).toBe('sunrise');
+      expect(state.sunrise!.isWithinValidityRange).toBe(true);
+      expect(state.sunrise!.isAccuracyDegraded).toBe(false);
+      expect(state.sunrise!.uncertaintyMinutes).toBeGreaterThan(0.0);
+
+      expect(state.sunset).toBeInstanceOf(SolarEventInstant);
+      expect(state.sunset!.event).toBe('sunset');
+      expect(state.sunset!.isWithinValidityRange).toBe(true);
+      expect(state.sunset!.isAccuracyDegraded).toBe(false);
+      expect(state.sunset!.uncertaintyMinutes).toBeGreaterThan(0.0);
+
+      // Historical out-of-range evaluation preserves degraded metadata on event properties
+      const histInstant = ChronoFlux.instant('1600-06-21T12:00:00Z');
+      const histState = ChronoFlux.solar.evaluate(histInstant, greenwich);
+      expect(histState.solarNoon.isWithinValidityRange).toBe(false);
+      expect(histState.solarNoon.isAccuracyDegraded).toBe(true);
+      expect(histState.sunrise!.isWithinValidityRange).toBe(false);
+      expect(histState.sunrise!.isAccuracyDegraded).toBe(true);
     });
   });
 

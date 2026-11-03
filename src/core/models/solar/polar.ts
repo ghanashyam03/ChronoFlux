@@ -101,8 +101,12 @@ export function evaluatePolarRegime(place: Place, instant: Instant): PolarRegime
  * so that locations in polar night correctly report civil, nautical, or astronomical twilight
  * or night according to instantaneous solar elevation.
  */
-export function classifySolarPhase(geometricElevationDeg: number): SolarPhase {
-  if (geometricElevationDeg >= DIRECT_SUNLIGHT_THRESHOLD_DEG) {
+export function classifySolarPhase(
+  geometricElevationDeg: number,
+  horizonDipDeg: number = 0
+): SolarPhase {
+  const dayThreshold = DIRECT_SUNLIGHT_THRESHOLD_DEG - Math.max(0, horizonDipDeg);
+  if (geometricElevationDeg >= dayThreshold) {
     return 'day';
   }
   if (geometricElevationDeg >= CIVIL_TWILIGHT_ELEVATION_DEG) {

@@ -254,22 +254,22 @@ export interface SolarState {
   /**
    * Transit instant (solar noon) when the Sun reaches diurnal maximum elevation.
    */
-  readonly solarNoon: Instant;
+  readonly solarNoon: SolarEventInstant;
 
   /**
    * Nadir instant (solar midnight) when the Sun reaches diurnal minimum elevation.
    */
-  readonly solarMidnight: Instant;
+  readonly solarMidnight: SolarEventInstant;
 
   /**
    * Sunrise instant for the diurnal cycle, or null if in polar day or polar night.
    */
-  readonly sunrise: Instant | null;
+  readonly sunrise: SolarEventInstant | null;
 
   /**
    * Sunset instant for the diurnal cycle, or null if in polar day or polar night.
    */
-  readonly sunset: Instant | null;
+  readonly sunset: SolarEventInstant | null;
 
   /**
    * Solar declination in degrees [-23.45°, +23.45°].

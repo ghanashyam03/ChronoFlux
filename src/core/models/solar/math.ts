@@ -667,22 +667,15 @@ export function solvePolarCrossingBracket(
   let fA = computeSolarCoordinates(Instant.fromEpochNanoseconds(startNs), place).geometricElevationDeg - targetElevationDeg;
   let fB = computeSolarCoordinates(Instant.fromEpochNanoseconds(endNs), place).geometricElevationDeg - targetElevationDeg;
 
-  // Tangential touch checks at endpoints respecting toleranceDeg
-  if (Math.abs(fA) <= toleranceDeg) {
+  // Tangential touch checks at endpoints respecting toleranceDeg (choosing minimum residual)
+  if (Math.abs(fA) <= toleranceDeg || Math.abs(fB) <= toleranceDeg) {
+    const bestNs = Math.abs(fA) <= Math.abs(fB) ? startNs : endNs;
+    const bestResidual = Math.min(Math.abs(fA), Math.abs(fB));
     return {
-      crossingInstant: Instant.fromEpochNanoseconds(startNs),
+      crossingInstant: Instant.fromEpochNanoseconds(bestNs),
       status: 'converged',
       iterations: 0,
-      residualDeg: Math.abs(fA),
-      isResidualVerified: true,
-    };
-  }
-  if (Math.abs(fB) <= toleranceDeg) {
-    return {
-      crossingInstant: Instant.fromEpochNanoseconds(endNs),
-      status: 'converged',
-      iterations: 0,
-      residualDeg: Math.abs(fB),
+      residualDeg: bestResidual,
       isResidualVerified: true,
     };
   }
