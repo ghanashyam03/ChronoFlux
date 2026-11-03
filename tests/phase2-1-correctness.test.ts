@@ -552,12 +552,16 @@ describe('Phase 2.1 Scientific & Semantic Correctness Audit', () => {
 
     it('demonstrates evaluatePosition throughput without diurnal solving overhead', () => {
       const instant = ChronoFlux.now();
+      // JIT warmup
+      for (let i = 0; i < 50; i++) {
+        ChronoFlux.solar.evaluatePosition(instant, greenwich);
+      }
       const t0 = performance.now();
       for (let i = 0; i < 1000; i++) {
         ChronoFlux.solar.evaluatePosition(instant, greenwich);
       }
       const t1 = performance.now();
-      // 1000 instantaneous evaluations should execute in under 30ms
+      // 1000 instantaneous evaluations should execute in under 50ms
       expect(t1 - t0).toBeLessThan(50);
     });
 

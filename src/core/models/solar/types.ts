@@ -30,7 +30,15 @@ export type SolarPhase =
 export type PolarRegimeType = 'none' | 'polar_day' | 'polar_night';
 
 /**
- * Granular breakdown of coordinate, atmospheric, and dynamic event-time uncertainties.
+ * Condition of solar elevation threshold crossing based on rate of elevation change |dh/dt|:
+ * - 'well_conditioned': Rapid or steady crossing (|dh/dt| >= 1e-5°/s, or steady polar equinox seasonal crossings).
+ * - 'grazing': Near-tangential crossing where the solar elevation reaches a diurnal/seasonal extremum near the threshold.
+ * - 'ill_conditioned': Extremely flat crossing where rate of elevation change is degenerate (|dh/dt| < 1e-7°/s).
+ */
+export type CrossingCondition = 'ill_conditioned' | 'grazing' | 'well_conditioned';
+
+/**
+ * Granular breakdown of coordinate, atmospheric, time-scale, and dynamic event-time uncertainties.
  */
 export interface SolarUncertaintyDetails {
   /**
@@ -47,23 +55,30 @@ export interface SolarUncertaintyDetails {
   readonly atmosphericRefractionUncertaintyDeg: number;
 
   /**
+   * Propagated astronomical time-scale provider uncertainty in degrees, derived from provider Delta T and DUT1 uncertainties.
+   * Delta T uncertainty affects ephemeris orbital longitude (TT); DUT1 uncertainty affects Earth rotation angle (UT1).
+   */
+  readonly timeScaleUncertaintyDeg: number;
+
+  /**
    * Combined root-sum-square instantaneous angular uncertainty in degrees:
-   * Delta h(t) = sqrt(numericalErrorDeg^2 + atmosphericRefractionUncertaintyDeg^2).
+   * Delta h(t) = sqrt(numericalErrorDeg^2 + atmosphericRefractionUncertaintyDeg^2 + timeScaleUncertaintyDeg^2).
    * Semantics: Instantaneous coordinate error bound.
    */
   readonly combinedCoordinateUncertaintyDeg: number;
 
   /**
-   * Instantaneous threshold crossing sensitivity |dh/dt| in degrees per minute at the evaluated instant:
-   * dh/dt = -cos(phi)*cos(delta)*sin(H) * (0.25 deg/min) / cos(h).
+   * Instantaneous threshold crossing sensitivity |dh/dt| in degrees per minute at the evaluated instant,
+   * accounting for both diurnal Earth rotation and seasonal solar declination change.
    * Semantics: Rate of solar elevation change with respect to time.
    */
   readonly crossingSensitivityDegPerMin: number;
 
   /**
    * Dynamic threshold-crossing time uncertainty in minutes: Delta t = Delta h / |dh/dt|.
-   * Dynamically expands near diurnal stationary points (noon/midnight) or high latitudes where |dh/dt| -> 0.
-   * Semantics: Sensitivity of crossing an arbitrary elevation threshold at the evaluated instant's rate.
+   * Evaluated dynamically from full-model derivative. For grazing or ill-conditioned crossings,
+   * governed by threshold curvature or safe limit bounds.
+   * Semantics: Sensitivity of crossing an elevation threshold at the evaluated instant's rate.
    */
   readonly eventTimeUncertaintyMinutes: number;
 
@@ -84,10 +99,16 @@ export interface SolarUncertaintyDetails {
   readonly sunsetUncertaintyMinutes: number | null;
 
   /**
-   * Horizon limitation dip in degrees due to observer height above sea level: 0.0293 * sqrt(elevationMeters).
-   * Semantics: Geometric horizon depression dependent on external elevation measurement.
+   * Horizon limitation dip in degrees due to observer orthometric elevation above mean sea level:
+   * d_dip = (1.76 / 60) * sqrt(max(0, elevationMeters)).
+   * Semantics: Geometric horizon depression for an unobstructed sea-level horizon.
    */
   readonly horizonLimitationDeg: number;
+
+  /**
+   * Crossing condition classification for the event or evaluated instant.
+   */
+  readonly crossingCondition?: CrossingCondition | undefined;
 }
 
 /**
@@ -369,6 +390,7 @@ export class SolarEventInstant extends Instant {
   readonly uncertaintyDeg: number;
   readonly uncertaintyMinutes: number;
   readonly uncertainty: SolarUncertaintyDetails;
+  readonly crossingCondition?: CrossingCondition | undefined;
 
   constructor(
     epochNanoseconds: bigint,
@@ -379,6 +401,7 @@ export class SolarEventInstant extends Instant {
       uncertaintyDeg: number;
       uncertaintyMinutes: number;
       uncertainty: SolarUncertaintyDetails;
+      crossingCondition?: CrossingCondition | undefined;
     }
   ) {
     super(epochNanoseconds);
@@ -388,6 +411,7 @@ export class SolarEventInstant extends Instant {
     this.uncertaintyDeg = metadata.uncertaintyDeg;
     this.uncertaintyMinutes = metadata.uncertaintyMinutes;
     this.uncertainty = metadata.uncertainty;
+    this.crossingCondition = metadata.crossingCondition ?? metadata.uncertainty.crossingCondition;
     Object.freeze(this);
   }
 }
@@ -405,6 +429,7 @@ export class SolarTransitionInstant extends Instant {
   readonly uncertaintyDeg: number;
   readonly uncertaintyMinutes: number;
   readonly uncertainty: SolarUncertaintyDetails;
+  readonly crossingCondition?: CrossingCondition | undefined;
 
   constructor(
     epochNanoseconds: bigint,
@@ -416,6 +441,7 @@ export class SolarTransitionInstant extends Instant {
       uncertaintyDeg: number;
       uncertaintyMinutes: number;
       uncertainty: SolarUncertaintyDetails;
+      crossingCondition?: CrossingCondition | undefined;
     }
   ) {
     super(epochNanoseconds);
@@ -426,6 +452,7 @@ export class SolarTransitionInstant extends Instant {
     this.uncertaintyDeg = metadata.uncertaintyDeg;
     this.uncertaintyMinutes = metadata.uncertaintyMinutes;
     this.uncertainty = metadata.uncertainty;
+    this.crossingCondition = metadata.crossingCondition ?? metadata.uncertainty.crossingCondition;
     Object.freeze(this);
   }
 }

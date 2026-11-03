@@ -40,9 +40,11 @@ export interface PolarRegime {
  * Evaluates whether the given place and instant falls in a Polar Day or Polar Night regime
  * on its diurnal cycle.
  *
- * Polar day and polar night are strictly evaluated on geometric solar elevation (h_geom):
- * - Polar Day: Diurnal minimum h_geom >= -0.8333° (apparent upper limb never sets).
- * - Polar Night: Diurnal maximum h_geom < -0.8333° (apparent upper limb never rises).
+ * Polar day and polar night are strictly evaluated on geometric solar elevation (h_geom)
+ * relative to the observer's elevation-adjusted horizon dip threshold:
+ * theta_effective = -0.8333° - d_dip, where d_dip = (1.76 / 60) * sqrt(max(0, elevationMeters)).
+ * - Polar Day: Diurnal minimum h_geom >= theta_effective (apparent upper limb never sets).
+ * - Polar Night: Diurnal maximum h_geom < theta_effective (apparent upper limb never rises).
  */
 export function evaluatePolarRegime(place: Place, instant: Instant): PolarRegime {
   const noon = calcSolarNoon(instant, place.longitude);

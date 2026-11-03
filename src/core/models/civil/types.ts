@@ -53,11 +53,13 @@ export interface CivilTransitionInfo {
 /**
  * Confidence level of Daylight Saving Time (DST) determination.
  *
- * - 'authoritative': Confirmed via explicit IANA time zone name indicator (e.g. 'Daylight Time',
- *                   'Summer Time', 'Standard Time', or non-DST zones with constant annual offset).
- * - 'heuristic':     Inferred solely from annual offset comparisons in jurisdictions with numeric
- *                   or non-descriptive runtime timezone names (e.g. Morocco Ramadan shifts or administrative shifts).
- * - 'unknown':       Indeterminate due to runtime environment limitations.
+ * - 'authoritative': Explicitly verified through statutory runtime time-zone name indicators
+ *                   (e.g. 'Daylight Time', 'Summer Time', 'Standard Time', 'Mean Time', 'Coordinated Universal Time',
+ *                   or statutory rules such as Irish Standard Time).
+ * - 'heuristic':     Inferred solely from annual offset distribution comparisons across months
+ *                   in jurisdictions with numeric offsets or non-descriptive runtime names
+ *                   (e.g. 'GMT+3', Morocco Ramadan shifts, or zones without explicit statutory name indicators).
+ * - 'unknown':       Indeterminate due to runtime environment exceptions or formatting failures.
  */
 export type DstConfidence = 'authoritative' | 'heuristic' | 'unknown';
 

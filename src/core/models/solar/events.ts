@@ -9,6 +9,7 @@ import { Place } from '../../primitives/place.js';
 import {
   ASTRONOMICAL_TWILIGHT_ELEVATION_DEG,
   calcHorizonDip,
+  calcSolarCrossingDetails,
   calcSolarMidnight,
   calcSolarNoon,
   CIVIL_TWILIGHT_ELEVATION_DEG,
@@ -18,7 +19,7 @@ import {
   NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
   SOLAR_MODEL_VALIDITY_RANGE,
 } from './math.js';
-import { SolarEventInstant, SolarEventName, SolarEventOptions } from './types.js';
+import { SolarEventInstant, SolarEventName, SolarEventOptions, SolarUncertaintyDetails } from './types.js';
 
 const ONE_DAY_NS = 86_400_000_000_000n;
 
@@ -30,13 +31,59 @@ function createEventInstant(
   const coords = computeSolarCoordinates(instant, place);
   const isWithinValidityRange = SOLAR_MODEL_VALIDITY_RANGE.contains(instant);
   const isAccuracyDegraded = !isWithinValidityRange;
+
+  let eventUncertainty: SolarUncertaintyDetails = coords.uncertainty;
+  let crossingCondition = coords.uncertainty.crossingCondition;
+  let eventTimeUncertaintyMinutes = coords.uncertainty.eventTimeUncertaintyMinutes;
+
+  if (event !== 'solarNoon' && event !== 'solarMidnight') {
+    const horizonDip = calcHorizonDip(place.elevationMeters);
+    let targetElev: number;
+    switch (event) {
+      case 'sunrise':
+      case 'sunset':
+        targetElev = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG - horizonDip;
+        break;
+      case 'civilDawn':
+      case 'civilDusk':
+        targetElev = CIVIL_TWILIGHT_ELEVATION_DEG;
+        break;
+      case 'nauticalDawn':
+      case 'nauticalDusk':
+        targetElev = NAUTICAL_TWILIGHT_ELEVATION_DEG;
+        break;
+      case 'astronomicalDawn':
+      case 'astronomicalDusk':
+        targetElev = ASTRONOMICAL_TWILIGHT_ELEVATION_DEG;
+        break;
+      default:
+        targetElev = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG;
+    }
+    const crossingDetails = calcSolarCrossingDetails(place, instant, targetElev);
+    eventTimeUncertaintyMinutes = crossingDetails.uncertaintyMinutes;
+    crossingCondition = crossingDetails.crossingCondition;
+    eventUncertainty = Object.freeze({
+      ...coords.uncertainty,
+      eventTimeUncertaintyMinutes: crossingDetails.uncertaintyMinutes,
+      crossingCondition: crossingDetails.crossingCondition,
+      sunriseUncertaintyMinutes: event === 'sunrise' ? crossingDetails.uncertaintyMinutes : null,
+      sunsetUncertaintyMinutes: event === 'sunset' ? crossingDetails.uncertaintyMinutes : null,
+    });
+  } else {
+    eventUncertainty = Object.freeze({
+      ...coords.uncertainty,
+      eventTimeUncertaintyMinutes: coords.uncertainty.eventTimeUncertaintyMinutes,
+    });
+  }
+
   return new SolarEventInstant(instant.epochNanoseconds, {
     event,
     isWithinValidityRange,
     isAccuracyDegraded,
     uncertaintyDeg: coords.uncertainty.combinedCoordinateUncertaintyDeg,
-    uncertaintyMinutes: coords.uncertainty.eventTimeUncertaintyMinutes,
-    uncertainty: coords.uncertainty,
+    uncertaintyMinutes: eventTimeUncertaintyMinutes,
+    uncertainty: eventUncertainty,
+    crossingCondition,
   });
 }
 

@@ -8,6 +8,7 @@ import { Instant } from '../../primitives/instant.js';
 import { Interval } from '../../primitives/interval.js';
 import { Place } from '../../primitives/place.js';
 import { AstronomicalTimeScale, getAstronomicalTimeScale } from './timescale.js';
+import { CrossingCondition } from './types.js';
 
 export const SOLAR_MODEL_VALIDITY_RANGE = new Interval(
   Instant.fromEpochMilliseconds(-5364662400000), // 1800-01-01T00:00:00Z
@@ -40,11 +41,20 @@ export const ASTRONOMICAL_TWILIGHT_ELEVATION_DEG = -18.0;
 
 /**
  * Calculates geometric horizon dip in degrees for an observer at height h meters
- * above the unobstructed sea-level horizon:
- * d_dip = (1.76 / 60) * sqrt(max(0, h_meters)) degrees.
+ * above the unobstructed mean sea level (MSL) horizon:
+ * d_dip = (1.76 / 60) * sqrt(max(0, elevationMeters)) degrees.
  *
- * Explicit Assumption: Assumes unobstructed sea-level horizon dip.
- * Does NOT model local topographical features, mountain ridges, or architectural/building obstruction.
+ * Elevation Datum & Semantics:
+ * Place.elevationMeters is defined as orthometric elevation in meters above mean sea level (geoid).
+ * Geometric horizon dip lowers the effective sunrise/sunset horizon threshold:
+ * theta_effective = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG - d_dip.
+ * This accounts for the curvature of the Earth and mean terrestrial refraction over sea water.
+ *
+ * Explicit Boundary & Modeling Assumptions:
+ * - Assumes an unobstructed geometric sea-level horizon (water or flat terrain at datum).
+ * - Local topographical obstructions (hills, mountain ridges, valleys) and architectural
+ *   structures (buildings, towers) are EXPLICITLY outside the scope of this model and
+ *   require separate viewshed / obstruction angle modeling.
  */
 export function calcHorizonDip(elevationMeters: number = 0): number {
   return elevationMeters > 0 ? (1.76 / 60.0) * Math.sqrt(elevationMeters) : 0.0;
@@ -383,7 +393,10 @@ export function calcSolarUncertainty(
   hourAngleDeg: number,
   refractionDeg: number,
   elevationMeters: number = 0,
-  tJulianCentury?: number
+  tJulianCentury?: number,
+  instant?: Instant,
+  place?: Place,
+  timeScale: AstronomicalTimeScale = getAstronomicalTimeScale()
 ) {
   // Truncated ephemeris error is ±0.01° within 1800-2100 CE (T in [-2.0, +1.0] relative to J2000.0).
   // Degrades quadratically for centuries outside this validity range.
@@ -401,33 +414,77 @@ export function calcSolarUncertainty(
   }
 
   const atmosphericRefractionUncertaintyDeg = Math.max(0.001, refractionDeg * 0.12);
+
+  // Time-scale uncertainty propagated from provider
+  const timeScaleUncertainties = timeScale.getUncertainty
+    ? timeScale.getUncertainty(instant ?? Instant.now())
+    : {
+        deltaTUncertaintySeconds: timeScale.metadata?.deltaTUncertaintySeconds ?? 1.0,
+        dut1UncertaintySeconds: timeScale.metadata?.dut1UncertaintySeconds ?? 0.9,
+      };
+  // Ephemeris coordinate sensitivity to Delta T on TT: ~0.041 arcsec/s = 0.041 / 3600 deg/s
+  const ttUncertaintyDeg = timeScaleUncertainties.deltaTUncertaintySeconds * (0.041 / 3600.0);
+  // Diurnal coordinate sensitivity to DUT1 on UT1: 15 arcsec/s = 15 / 3600 deg/s
+  const ut1UncertaintyDeg = timeScaleUncertainties.dut1UncertaintySeconds * (15.0 / 3600.0);
+  const timeScaleUncertaintyDeg = Math.sqrt(
+    ttUncertaintyDeg * ttUncertaintyDeg + ut1UncertaintyDeg * ut1UncertaintyDeg
+  );
+
   const combinedCoordinateUncertaintyDeg = Math.sqrt(
     numericalErrorDeg * numericalErrorDeg +
       atmosphericRefractionUncertaintyDeg * atmosphericRefractionUncertaintyDeg
   );
 
-  // Rate of change dh/dt in degrees per minute
-  // dh/dt = -cos(phi)*cos(delta)*sin(H) * (0.25 deg/min) / cos(h)
+  // Total angular uncertainty combining coordinate and time-scale provider uncertainty
+  const totalUncertaintyDeg = Math.sqrt(
+    combinedCoordinateUncertaintyDeg * combinedCoordinateUncertaintyDeg +
+      timeScaleUncertaintyDeg * timeScaleUncertaintyDeg
+  );
+
+  // Diurnal rate of change dh/dt in degrees per second / minute
   const phiRad = degToRad(latitudeDeg);
   const deltaRad = degToRad(declinationDeg);
   const hRad = degToRad(hourAngleDeg);
   const cosH = Math.max(0.01, Math.cos(degToRad(geometricElevationDeg)));
-  const dhDtPerMin = Math.abs(
+  let dhDtPerMin = Math.abs(
     (-Math.cos(phiRad) * Math.cos(deltaRad) * Math.sin(hRad) * 0.25) / cosH
   );
+  let dhDtPerSec = dhDtPerMin / 60.0;
+  const omegaSec = degToRad(0.25 / 60.0);
+  let d2hDt2PerSec2 = Math.abs(Math.cos(phiRad) * Math.cos(deltaRad)) * omegaSec * omegaSec;
+
+  // In polar regions (|cos(phi)| < 1e-3) where diurnal rate is degenerate,
+  // evaluate 30-second central difference derivative to capture seasonal declination rate
+  if (Math.abs(Math.cos(phiRad)) < 1e-3 && instant !== undefined && place !== undefined) {
+    const THIRTY_SEC_NS = 30_000_000_000n;
+    const tPlus = Instant.fromEpochNanoseconds(instant.epochNanoseconds + THIRTY_SEC_NS);
+    const tMinus = Instant.fromEpochNanoseconds(instant.epochNanoseconds - THIRTY_SEC_NS);
+    const hPlus = computeSolarCoordinates(tPlus, place, timeScale, true).geometricElevationDeg;
+    const hMinus = computeSolarCoordinates(tMinus, place, timeScale, true).geometricElevationDeg;
+
+    dhDtPerSec = (hPlus - hMinus) / 60.0;
+    dhDtPerMin = Math.abs(hPlus - hMinus);
+    d2hDt2PerSec2 = (hPlus - 2 * geometricElevationDeg + hMinus) / 900.0;
+  }
+
+  const absDhDtSec = Math.abs(dhDtPerSec);
+  let crossingCondition: CrossingCondition;
+  if (absDhDtSec < 1e-7) {
+    crossingCondition = 'ill_conditioned';
+  } else if (absDhDtSec < 1e-5 && Math.abs(d2hDt2PerSec2) > 1e-8) {
+    crossingCondition = 'grazing';
+  } else {
+    crossingCondition = 'well_conditioned';
+  }
 
   let eventTimeUncertaintyMinutes: number;
-  if (dhDtPerMin > 1e-5) {
-    eventTimeUncertaintyMinutes = combinedCoordinateUncertaintyDeg / dhDtPerMin;
+  if (dhDtPerMin > 1e-7 * 60.0) {
+    eventTimeUncertaintyMinutes = totalUncertaintyDeg / dhDtPerMin;
+  } else if (Math.abs(d2hDt2PerSec2) > 1e-10) {
+    eventTimeUncertaintyMinutes =
+      Math.sqrt((2 * totalUncertaintyDeg) / Math.abs(d2hDt2PerSec2)) / 60.0;
   } else {
-    // Near transit (dh/dt = 0), curvature d2h/dt2 governs transit time uncertainty
-    const omegaMin = degToRad(0.25); // radians per minute
-    const d2hDt2 = Math.abs(Math.cos(phiRad) * Math.cos(deltaRad)) * omegaMin * omegaMin;
-    if (d2hDt2 > 1e-8) {
-      eventTimeUncertaintyMinutes = Math.sqrt((2 * degToRad(combinedCoordinateUncertaintyDeg)) / d2hDt2);
-    } else {
-      eventTimeUncertaintyMinutes = 60.0; // high-latitude flat diurnal curve
-    }
+    eventTimeUncertaintyMinutes = totalUncertaintyDeg / (1e-7 * 60.0);
   }
 
   const horizonLimitationDeg = calcHorizonDip(elevationMeters);
@@ -435,12 +492,76 @@ export function calcSolarUncertainty(
   return {
     numericalErrorDeg,
     atmosphericRefractionUncertaintyDeg,
+    timeScaleUncertaintyDeg,
     combinedCoordinateUncertaintyDeg,
     crossingSensitivityDegPerMin: dhDtPerMin,
     eventTimeUncertaintyMinutes,
     sunriseUncertaintyMinutes: null as number | null,
     sunsetUncertaintyMinutes: null as number | null,
     horizonLimitationDeg,
+    crossingCondition,
+  };
+}
+
+/**
+ * Detailed diagnostic result of solar crossing time uncertainty.
+ */
+export interface SolarCrossingDetails {
+  readonly uncertaintyMinutes: number;
+  readonly crossingCondition: CrossingCondition;
+  readonly dhDtDegPerSec: number;
+  readonly dhDtDegPerMin: number;
+}
+
+/**
+ * Calculates event-crossing time uncertainty and crossing condition evaluated at the actual event instant.
+ * Uses a full-model central difference derivative Delta t = 30s capturing both diurnal Earth rotation
+ * and seasonal solar declination changes everywhere, including polar equinox transitions.
+ */
+export function calcSolarCrossingDetails(
+  place: Place,
+  eventInstant: Instant,
+  _targetElevationDeg: number = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
+  timeScale: AstronomicalTimeScale = getAstronomicalTimeScale()
+): SolarCrossingDetails {
+  const coords = computeSolarCoordinates(eventInstant, place, timeScale);
+  const deltaH = coords.uncertainty.combinedCoordinateUncertaintyDeg;
+
+  // Numerical central difference with Delta t = 30 seconds
+  const THIRTY_SEC_NS = 30_000_000_000n;
+  const tPlus = Instant.fromEpochNanoseconds(eventInstant.epochNanoseconds + THIRTY_SEC_NS);
+  const tMinus = Instant.fromEpochNanoseconds(eventInstant.epochNanoseconds - THIRTY_SEC_NS);
+  const hPlus = computeSolarCoordinates(tPlus, place, timeScale, true).geometricElevationDeg;
+  const hMinus = computeSolarCoordinates(tMinus, place, timeScale, true).geometricElevationDeg;
+
+  const dhDtDegPerSec = (hPlus - hMinus) / 60.0;
+  const dhDtDegPerMin = Math.abs(hPlus - hMinus);
+  const d2hDt2PerSec2 = (hPlus - 2 * coords.geometricElevationDeg + hMinus) / 900.0;
+
+  const absDhDtSec = Math.abs(dhDtDegPerSec);
+  let crossingCondition: CrossingCondition;
+  if (absDhDtSec < 1e-7) {
+    crossingCondition = 'ill_conditioned';
+  } else if (absDhDtSec < 1e-5 && Math.abs(d2hDt2PerSec2) > 1e-8) {
+    crossingCondition = 'grazing';
+  } else {
+    crossingCondition = 'well_conditioned';
+  }
+
+  let uncertaintyMinutes: number;
+  if (dhDtDegPerMin > 1e-7 * 60.0) {
+    uncertaintyMinutes = deltaH / dhDtDegPerMin;
+  } else if (Math.abs(d2hDt2PerSec2) > 1e-10) {
+    uncertaintyMinutes = Math.sqrt((2 * deltaH) / Math.abs(d2hDt2PerSec2)) / 60.0;
+  } else {
+    uncertaintyMinutes = deltaH / (1e-7 * 60.0);
+  }
+
+  return {
+    uncertaintyMinutes,
+    crossingCondition,
+    dhDtDegPerSec,
+    dhDtDegPerMin,
   };
 }
 
@@ -451,34 +572,26 @@ export function calcSolarUncertainty(
 export function calcSolarCrossingUncertainty(
   place: Place,
   eventInstant: Instant,
-  _targetElevationDeg: number = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG
+  targetElevationDeg: number = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG,
+  timeScale: AstronomicalTimeScale = getAstronomicalTimeScale()
 ): number {
-  const coords = computeSolarCoordinates(eventInstant, place);
-  const deltaH = coords.uncertainty.combinedCoordinateUncertaintyDeg;
-  const dhDtPerMin = coords.uncertainty.crossingSensitivityDegPerMin;
-
-  if (dhDtPerMin > 1e-5) {
-    return deltaH / dhDtPerMin;
-  }
-  // Tangential / grazing crossing: curvature d2h/dt2 governs transit uncertainty
-  const phiRad = degToRad(place.latitude);
-  const deltaRad = degToRad(coords.declinationDeg);
-  const omegaMin = degToRad(0.25);
-  const d2hDt2 = Math.abs(Math.cos(phiRad) * Math.cos(deltaRad)) * omegaMin * omegaMin;
-  if (d2hDt2 > 1e-8) {
-    return Math.sqrt((2 * degToRad(deltaH)) / d2hDt2);
-  }
-  return 60.0;
+  return calcSolarCrossingDetails(place, eventInstant, targetElevationDeg, timeScale).uncertaintyMinutes;
 }
 
 /**
  * Computes the solar coordinates bundle at a given instant and place using the active
  * astronomical time-scale provider (TT for ephemeris, UT1 for diurnal rotation).
+ *
+ * @param instant Physical epoch Instant
+ * @param place Geographic location
+ * @param timeScale Active astronomical time scale provider
+ * @param skipUncertainty If true, skips uncertainty and azimuth evaluation (used for internal numerical derivatives)
  */
 export function computeSolarCoordinates(
   instant: Instant,
   place: Place,
-  timeScale: AstronomicalTimeScale = getAstronomicalTimeScale()
+  timeScale: AstronomicalTimeScale = getAstronomicalTimeScale(),
+  skipUncertainty: boolean = false
 ) {
   const t = instantToJulianCentury(instant, timeScale);
   const l0 = calcGeomMeanLongSun(t);
@@ -496,6 +609,30 @@ export function computeSolarCoordinates(
   const hourAngleDeg = calcHourAngle(trueSolarTimeMinutes);
 
   const angles = calcSolarElevationAndZenith(place.latitude, declinationDeg, hourAngleDeg);
+
+  if (skipUncertainty) {
+    return {
+      t,
+      l0,
+      m,
+      e,
+      c,
+      trueLong,
+      appLong,
+      meanObliq,
+      obliqCorr,
+      rightAscensionDeg,
+      declinationDeg,
+      equationOfTimeMinutes,
+      trueSolarTimeMinutes,
+      hourAngleDeg,
+      azimuthDeg: null,
+      isAzimuthIndeterminate: false,
+      uncertainty: null as any,
+      ...angles,
+    };
+  }
+
   const { azimuthDeg, isAzimuthIndeterminate } = calcSolarAzimuth(
     place.latitude,
     declinationDeg,
@@ -509,9 +646,11 @@ export function computeSolarCoordinates(
     hourAngleDeg,
     angles.atmosphericRefractionDeg,
     place.elevationMeters ?? 0,
-    t
+    t,
+    instant,
+    place,
+    timeScale
   );
-
 
   return {
     t,
@@ -604,8 +743,11 @@ export function calcSolarMidnight(instant: Instant, longitudeDeg: number): Insta
 }
 
 /**
- * Maximum safe bracket width in nanoseconds for relative nanosecond Number conversion.
- * Stays well within Number.MAX_SAFE_INTEGER (~9e15 ns ≈ 104.2 days).
+ * Maximum safe bracket width in nanoseconds for relative nanosecond arithmetic.
+ * Set to 9,000,000,000,000,000 ns (= 9,000,000 s = 2,500 hours = 104 days 4 hours ≈ 104.167 days).
+ * Strictly less than Number.MAX_SAFE_INTEGER (2^53 - 1 = 9,007,199,254,740,991 ns),
+ * guaranteeing exact integer nanosecond representation without precision loss in relative
+ * IEEE 754 double-precision floating-point differences.
  */
 export const MAX_SAFE_POLAR_BRACKET_WIDTH_NS = 9_000_000_000_000_000n;
 

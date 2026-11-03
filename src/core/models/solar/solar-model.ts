@@ -11,7 +11,7 @@ import { ModelMetadata, TemporalModel } from '../model.js';
 import { findNextSolarEvent } from './events.js';
 import {
   calcHorizonDip,
-  calcSolarCrossingUncertainty,
+  calcSolarCrossingDetails,
   calcSolarNoon,
   computeSolarCoordinates,
   findSolarCrossing,
@@ -89,6 +89,8 @@ function getDiurnalCycleEvents(place: Place, instant: Instant): DiurnalCycleEven
   let sunset: Instant | null = null;
   let sunriseUncertaintyMinutes: number | null = null;
   let sunsetUncertaintyMinutes: number | null = null;
+  let sunriseCondition: import('./types.js').CrossingCondition | undefined;
+  let sunsetCondition: import('./types.js').CrossingCondition | undefined;
 
   const horizonDipDeg = calcHorizonDip(place.elevationMeters);
   const targetElevationDeg = NOMINAL_SUNRISE_SUNSET_ELEVATION_DEG - horizonDipDeg;
@@ -101,11 +103,13 @@ function getDiurnalCycleEvents(place: Place, instant: Instant): DiurnalCycleEven
       'rising'
     );
     if (sunrise !== null) {
-      sunriseUncertaintyMinutes = calcSolarCrossingUncertainty(
+      const details = calcSolarCrossingDetails(
         place,
         sunrise,
         targetElevationDeg
       );
+      sunriseUncertaintyMinutes = details.uncertaintyMinutes;
+      sunriseCondition = details.crossingCondition;
     }
     sunset = findSolarCrossing(
       place,
@@ -114,47 +118,67 @@ function getDiurnalCycleEvents(place: Place, instant: Instant): DiurnalCycleEven
       'setting'
     );
     if (sunset !== null) {
-      sunsetUncertaintyMinutes = calcSolarCrossingUncertainty(
+      const details = calcSolarCrossingDetails(
         place,
         sunset,
         targetElevationDeg
       );
+      sunsetUncertaintyMinutes = details.uncertaintyMinutes;
+      sunsetCondition = details.crossingCondition;
     }
   }
 
   const isNoonValid = SOLAR_MODEL_VALIDITY_RANGE.contains(regime.solarNoon);
   const noonCoords = computeSolarCoordinates(regime.solarNoon, place);
+  const noonUncertainty: SolarUncertaintyDetails = Object.freeze({
+    ...noonCoords.uncertainty,
+    eventTimeUncertaintyMinutes: noonCoords.uncertainty.eventTimeUncertaintyMinutes,
+  });
   const solarNoon = new SolarEventInstant(regime.solarNoon.epochNanoseconds, {
     event: 'solarNoon',
     isWithinValidityRange: isNoonValid,
     isAccuracyDegraded: !isNoonValid,
     uncertaintyDeg: noonCoords.uncertainty.combinedCoordinateUncertaintyDeg,
-    uncertaintyMinutes: noonCoords.uncertainty.eventTimeUncertaintyMinutes,
-    uncertainty: noonCoords.uncertainty,
+    uncertaintyMinutes: noonUncertainty.eventTimeUncertaintyMinutes,
+    uncertainty: noonUncertainty,
+    crossingCondition: noonUncertainty.crossingCondition,
   });
 
   const isMidnightValid = SOLAR_MODEL_VALIDITY_RANGE.contains(regime.solarMidnight);
   const midnightCoords = computeSolarCoordinates(regime.solarMidnight, place);
+  const midnightUncertainty: SolarUncertaintyDetails = Object.freeze({
+    ...midnightCoords.uncertainty,
+    eventTimeUncertaintyMinutes: midnightCoords.uncertainty.eventTimeUncertaintyMinutes,
+  });
   const solarMidnight = new SolarEventInstant(regime.solarMidnight.epochNanoseconds, {
     event: 'solarMidnight',
     isWithinValidityRange: isMidnightValid,
     isAccuracyDegraded: !isMidnightValid,
     uncertaintyDeg: midnightCoords.uncertainty.combinedCoordinateUncertaintyDeg,
-    uncertaintyMinutes: midnightCoords.uncertainty.eventTimeUncertaintyMinutes,
-    uncertainty: midnightCoords.uncertainty,
+    uncertaintyMinutes: midnightUncertainty.eventTimeUncertaintyMinutes,
+    uncertainty: midnightUncertainty,
+    crossingCondition: midnightUncertainty.crossingCondition,
   });
 
   let sunriseInst: SolarEventInstant | null = null;
   if (sunrise !== null) {
     const isSunriseValid = SOLAR_MODEL_VALIDITY_RANGE.contains(sunrise);
     const sunriseCoords = computeSolarCoordinates(sunrise, place);
+    const sunriseUncertainty: SolarUncertaintyDetails = Object.freeze({
+      ...sunriseCoords.uncertainty,
+      eventTimeUncertaintyMinutes: sunriseUncertaintyMinutes ?? sunriseCoords.uncertainty.eventTimeUncertaintyMinutes,
+      sunriseUncertaintyMinutes,
+      sunsetUncertaintyMinutes: null,
+      crossingCondition: sunriseCondition ?? sunriseCoords.uncertainty.crossingCondition,
+    });
     sunriseInst = new SolarEventInstant(sunrise.epochNanoseconds, {
       event: 'sunrise',
       isWithinValidityRange: isSunriseValid,
       isAccuracyDegraded: !isSunriseValid,
       uncertaintyDeg: sunriseCoords.uncertainty.combinedCoordinateUncertaintyDeg,
-      uncertaintyMinutes: sunriseUncertaintyMinutes ?? sunriseCoords.uncertainty.eventTimeUncertaintyMinutes,
-      uncertainty: sunriseCoords.uncertainty,
+      uncertaintyMinutes: sunriseUncertainty.eventTimeUncertaintyMinutes,
+      uncertainty: sunriseUncertainty,
+      crossingCondition: sunriseUncertainty.crossingCondition,
     });
   }
 
@@ -162,13 +186,21 @@ function getDiurnalCycleEvents(place: Place, instant: Instant): DiurnalCycleEven
   if (sunset !== null) {
     const isSunsetValid = SOLAR_MODEL_VALIDITY_RANGE.contains(sunset);
     const sunsetCoords = computeSolarCoordinates(sunset, place);
+    const sunsetUncertainty: SolarUncertaintyDetails = Object.freeze({
+      ...sunsetCoords.uncertainty,
+      eventTimeUncertaintyMinutes: sunsetUncertaintyMinutes ?? sunsetCoords.uncertainty.eventTimeUncertaintyMinutes,
+      sunriseUncertaintyMinutes: null,
+      sunsetUncertaintyMinutes,
+      crossingCondition: sunsetCondition ?? sunsetCoords.uncertainty.crossingCondition,
+    });
     sunsetInst = new SolarEventInstant(sunset.epochNanoseconds, {
       event: 'sunset',
       isWithinValidityRange: isSunsetValid,
       isAccuracyDegraded: !isSunsetValid,
       uncertaintyDeg: sunsetCoords.uncertainty.combinedCoordinateUncertaintyDeg,
-      uncertaintyMinutes: sunsetUncertaintyMinutes ?? sunsetCoords.uncertainty.eventTimeUncertaintyMinutes,
-      uncertainty: sunsetCoords.uncertainty,
+      uncertaintyMinutes: sunsetUncertainty.eventTimeUncertaintyMinutes,
+      uncertainty: sunsetUncertainty,
+      crossingCondition: sunsetUncertainty.crossingCondition,
     });
   }
 
@@ -320,7 +352,13 @@ export class SolarModel implements TemporalModel<SolarState> {
       const rising = findSolarCrossing(place, noon, thresholdDeg, 'rising');
       if (rising !== null && searchWindow.contains(rising)) {
         const coords = computeSolarCoordinates(rising, place);
+        const crossingDetails = calcSolarCrossingDetails(place, rising, thresholdDeg);
         const isWithinValidityRange = SOLAR_MODEL_VALIDITY_RANGE.contains(rising);
+        const transUncertainty: SolarUncertaintyDetails = Object.freeze({
+          ...coords.uncertainty,
+          eventTimeUncertaintyMinutes: crossingDetails.uncertaintyMinutes,
+          crossingCondition: crossingDetails.crossingCondition,
+        });
         transitions.push(
           new SolarTransitionInstant(rising.epochNanoseconds, {
             thresholdDeg,
@@ -328,8 +366,9 @@ export class SolarModel implements TemporalModel<SolarState> {
             isWithinValidityRange,
             isAccuracyDegraded: !isWithinValidityRange,
             uncertaintyDeg: coords.uncertainty.combinedCoordinateUncertaintyDeg,
-            uncertaintyMinutes: coords.uncertainty.eventTimeUncertaintyMinutes,
-            uncertainty: coords.uncertainty,
+            uncertaintyMinutes: transUncertainty.eventTimeUncertaintyMinutes,
+            uncertainty: transUncertainty,
+            crossingCondition: crossingDetails.crossingCondition,
           })
         );
       }
@@ -337,7 +376,13 @@ export class SolarModel implements TemporalModel<SolarState> {
       const setting = findSolarCrossing(place, noon, thresholdDeg, 'setting');
       if (setting !== null && searchWindow.contains(setting)) {
         const coords = computeSolarCoordinates(setting, place);
+        const crossingDetails = calcSolarCrossingDetails(place, setting, thresholdDeg);
         const isWithinValidityRange = SOLAR_MODEL_VALIDITY_RANGE.contains(setting);
+        const transUncertainty: SolarUncertaintyDetails = Object.freeze({
+          ...coords.uncertainty,
+          eventTimeUncertaintyMinutes: crossingDetails.uncertaintyMinutes,
+          crossingCondition: crossingDetails.crossingCondition,
+        });
         transitions.push(
           new SolarTransitionInstant(setting.epochNanoseconds, {
             thresholdDeg,
@@ -345,8 +390,9 @@ export class SolarModel implements TemporalModel<SolarState> {
             isWithinValidityRange,
             isAccuracyDegraded: !isWithinValidityRange,
             uncertaintyDeg: coords.uncertainty.combinedCoordinateUncertaintyDeg,
-            uncertaintyMinutes: coords.uncertainty.eventTimeUncertaintyMinutes,
-            uncertainty: coords.uncertainty,
+            uncertaintyMinutes: transUncertainty.eventTimeUncertaintyMinutes,
+            uncertainty: transUncertainty,
+            crossingCondition: crossingDetails.crossingCondition,
           })
         );
       }

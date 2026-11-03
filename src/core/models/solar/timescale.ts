@@ -33,16 +33,63 @@
  */
 
 import { Instant } from '../../primitives/instant.js';
+import { Interval } from '../../primitives/interval.js';
 import { instantToJulianDay, julianDayToJulianCentury } from './math.js';
+
+/**
+ * Metadata describing an astronomical time-scale provider's source, validity, and input uncertainties.
+ */
+export interface TimeScaleMetadata {
+  /**
+   * Provenance of the astronomical time-scale data (e.g. 'NASA TP-2006-214141', 'IERS Bulletin A').
+   */
+  readonly source: string;
+
+  /**
+   * Explanatory notes or description of the provider.
+   */
+  readonly description: string;
+
+  /**
+   * Validity range of the time-scale model if known.
+   */
+  readonly validityRange?: Interval | undefined;
+
+  /**
+   * Estimated uncertainty of Delta T (TT - UT1) in seconds.
+   */
+  readonly deltaTUncertaintySeconds: number;
+
+  /**
+   * Estimated uncertainty of DUT1 (UT1 - UTC) in seconds.
+   * Documented as an approximation when using civil broadcast leap-second bounds (|DUT1| < 0.9s).
+   */
+  readonly dut1UncertaintySeconds: number;
+
+  /**
+   * Whether DUT1 is an approximation (e.g. nominal 0.0s) rather than an observed/measured value.
+   */
+  readonly isDut1Approximation: boolean;
+}
 
 /**
  * Pluggable interface for astronomical time-scale conversions.
  */
 export interface AstronomicalTimeScale {
   /**
+   * Optional metadata describing provider provenance, validity, and input uncertainty.
+   */
+  readonly metadata?: TimeScaleMetadata | undefined;
+
+  /**
    * Calculates or approximates Delta T (ΔT = TT - UT1) in seconds for the given instant.
    */
   getDeltaT(instant: Instant): number;
+
+  /**
+   * Optional canonical alias for getDeltaT returning seconds.
+   */
+  getDeltaTSeconds?(instant: Instant): number;
 
   /**
    * Converts an Instant to Terrestrial Time (TT) expressed as a fractional Julian Day:
@@ -62,17 +109,88 @@ export interface AstronomicalTimeScale {
   toTerrestrialJulianCentury(instant: Instant): number;
 
   /**
-   * Optional method returning DUT1 (UT1 - UTC) in seconds.
-   * If omitted, DUT1 is derived from toUt1JulianDay(instant) - instantToJulianDay(instant).
+   * Returns DUT1 (UT1 - UTC) in seconds.
+   * If omitted, derived from toUt1JulianDay(instant) - instantToJulianDay(instant).
    */
   getDut1?(instant: Instant): number;
+
+  /**
+   * Optional canonical alias for getDut1 returning seconds.
+   */
+  getDut1Seconds?(instant: Instant): number;
+
+  /**
+   * Optional method returning granular input uncertainties in seconds.
+   */
+  getUncertainty?(instant: Instant): { deltaTUncertaintySeconds: number; dut1UncertaintySeconds: number };
+}
+
+/**
+ * Abstract canonical base class for astronomical time scale providers.
+ * Eliminates contradictory sources of truth by canonically deriving dependent
+ * Julian Day and Century values from getDeltaT and getDut1.
+ */
+export abstract class BaseAstronomicalTimeScale implements AstronomicalTimeScale {
+  abstract readonly metadata?: TimeScaleMetadata | undefined;
+
+  abstract getDeltaT(instant: Instant): number;
+
+  getDeltaTSeconds(instant: Instant): number {
+    return this.getDeltaT(instant);
+  }
+
+  getDut1(instant: Instant): number {
+    if (this.getDut1Seconds) {
+      return this.getDut1Seconds(instant);
+    }
+    return 0.0;
+  }
+
+  getDut1Seconds(instant: Instant): number {
+    return this.getDut1(instant);
+  }
+
+  toTerrestrialJulianDay(instant: Instant): number {
+    const jdUt = instantToJulianDay(instant);
+    const deltaTSec = this.getDeltaT(instant);
+    const dut1Sec = this.getDut1(instant);
+    return jdUt + (deltaTSec + dut1Sec) / 86400.0;
+  }
+
+  toUt1JulianDay(instant: Instant): number {
+    const jdUt = instantToJulianDay(instant);
+    const dut1Sec = this.getDut1(instant);
+    return jdUt + dut1Sec / 86400.0;
+  }
+
+  toTerrestrialJulianCentury(instant: Instant): number {
+    return julianDayToJulianCentury(this.toTerrestrialJulianDay(instant));
+  }
+
+  getUncertainty(_instant: Instant): { deltaTUncertaintySeconds: number; dut1UncertaintySeconds: number } {
+    return {
+      deltaTUncertaintySeconds: this.metadata?.deltaTUncertaintySeconds ?? 1.0,
+      dut1UncertaintySeconds: this.metadata?.dut1UncertaintySeconds ?? 0.9,
+    };
+  }
 }
 
 /**
  * Standard polynomial implementation of Delta T based on Espenak & Meeus (NASA TP-2006-214141).
  * Valid across historical and modern eras (-500 to +2150 CE).
+ *
+ * NOTE: Standard civil broadcast DUT1 = 0.0s is an operational approximation (|DUT1| < 0.9s via leap seconds),
+ * not an observed astronomical measurement.
  */
-export class StandardAstronomicalTimeScale implements AstronomicalTimeScale {
+export class StandardAstronomicalTimeScale extends BaseAstronomicalTimeScale {
+  readonly metadata: TimeScaleMetadata = Object.freeze({
+    source: 'Espenak & Meeus (NASA TP-2006-214141)',
+    description:
+      'Piecewise polynomial approximation of Delta T (TT - UT1). DUT1 is approximated as 0.0s under civil broadcast leap-second tolerance (|DUT1| < 0.9s); this is an approximation, not an observed value.',
+    deltaTUncertaintySeconds: 1.0,
+    dut1UncertaintySeconds: 0.9,
+    isDut1Approximation: true,
+  });
   /**
    * Computes Delta T in seconds using piecewise polynomial approximations
    * (Espenak & Meeus 2006).
@@ -170,37 +288,10 @@ export class StandardAstronomicalTimeScale implements AstronomicalTimeScale {
   /**
    * Returns DUT1 (UT1 - UTC) in seconds.
    * Under standard civil approximation without external IERS Bulletin A feed, DUT1 is 0.0 (|DUT1| < 0.9s).
+   * NOTE: This is a nominal civil broadcast approximation, not an observed astronomical measurement.
    */
-  getDut1(_instant: Instant): number {
+  override getDut1(_instant: Instant): number {
     return 0.0;
-  }
-
-  /**
-   * Converts an Instant to Terrestrial Time (TT) Julian Day:
-   * JD_TT = JD_UTC + (Delta T + DUT1) / 86400.0.
-   */
-  toTerrestrialJulianDay(instant: Instant): number {
-    const jdUt = instantToJulianDay(instant);
-    const deltaTSec = this.getDeltaT(instant);
-    const dut1Sec = this.getDut1(instant);
-    return jdUt + (deltaTSec + dut1Sec) / 86400.0;
-  }
-
-  /**
-   * Converts an Instant to Universal Time (UT1) Julian Day:
-   * JD_UT1 = JD_UTC + DUT1 / 86400.0.
-   */
-  toUt1JulianDay(instant: Instant): number {
-    const jdUt = instantToJulianDay(instant);
-    const dut1Sec = this.getDut1(instant);
-    return jdUt + dut1Sec / 86400.0;
-  }
-
-  /**
-   * Converts an Instant to Julian Century (T_TT) relative to J2000.0 on the Terrestrial Time scale.
-   */
-  toTerrestrialJulianCentury(instant: Instant): number {
-    return julianDayToJulianCentury(this.toTerrestrialJulianDay(instant));
   }
 }
 
@@ -227,9 +318,92 @@ export function onAstronomicalTimeScaleChange(
 }
 
 /**
- * Registers an active astronomical time scale provider.
+ * Options for creating an astronomical time scale provider with canonical conversions.
  */
-export function registerAstronomicalTimeScale(provider: AstronomicalTimeScale | null): void {
+export interface AstronomicalTimeScaleOptions {
+  readonly metadata?: TimeScaleMetadata | undefined;
+  readonly deltaT: number | ((instant: Instant) => number);
+  readonly dut1?: number | ((instant: Instant) => number);
+}
+
+/**
+ * Creates an astronomical time scale provider with canonical Julian Day and Century conversions,
+ * preventing contradictory definitions between Delta T, DUT1, TT, and UT1.
+ */
+export function createAstronomicalTimeScale(options: AstronomicalTimeScaleOptions): AstronomicalTimeScale {
+  const deltaTFn = typeof options.deltaT === 'function' ? options.deltaT : () => options.deltaT as number;
+  const dut1Fn =
+    options.dut1 !== undefined
+      ? typeof options.dut1 === 'function'
+        ? options.dut1
+        : () => options.dut1 as number
+      : () => 0.0;
+
+  class CustomTimeScale extends BaseAstronomicalTimeScale {
+    readonly metadata = options.metadata;
+    getDeltaT(instant: Instant): number {
+      return deltaTFn(instant);
+    }
+    override getDut1(instant: Instant): number {
+      return dut1Fn(instant);
+    }
+  }
+
+  return new CustomTimeScale();
+}
+
+/**
+ * Validates that an astronomical time scale provider is self-consistent and contains no
+ * contradictory conversions between Delta T, DUT1, TT Julian Day, and UT1 Julian Day.
+ * Throws RangeError if an inconsistency is detected.
+ */
+export function validateAstronomicalTimeScale(
+  provider: AstronomicalTimeScale,
+  testInstant?: Instant
+): void {
+  const instant = testInstant ?? Instant.fromEpochMilliseconds(1774011600000); // 2026-03-20T13:00:00Z
+  const jdUt = instantToJulianDay(instant);
+  const deltaT = provider.getDeltaT(instant);
+  const dut1 = provider.getDut1
+    ? provider.getDut1(instant)
+    : (provider.toUt1JulianDay(instant) - jdUt) * 86400.0;
+
+  const jdUt1 = provider.toUt1JulianDay(instant);
+  const expectedJdUt1 = jdUt + dut1 / 86400.0;
+  if (Math.abs(jdUt1 - expectedJdUt1) > 1e-4) {
+    throw new RangeError(
+      `AstronomicalTimeScale provider is inconsistent: toUt1JulianDay (${jdUt1.toFixed(8)}) contradicts getDut1 (${dut1}s, expected JD_UT1 ${expectedJdUt1.toFixed(8)}).`
+    );
+  }
+
+  const jdTt = provider.toTerrestrialJulianDay(instant);
+  const expectedJdTt = jdUt + (deltaT + dut1) / 86400.0;
+  if (Math.abs(jdTt - expectedJdTt) > 1e-4) {
+    throw new RangeError(
+      `AstronomicalTimeScale provider is inconsistent: toTerrestrialJulianDay (${jdTt.toFixed(8)}) contradicts getDeltaT (${deltaT}s) and getDut1 (${dut1}s, expected JD_TT ${expectedJdTt.toFixed(8)}).`
+    );
+  }
+
+  const century = provider.toTerrestrialJulianCentury(instant);
+  const expectedCentury = julianDayToJulianCentury(jdTt);
+  if (Math.abs(century - expectedCentury) > 1e-6) {
+    throw new RangeError(
+      `AstronomicalTimeScale provider is inconsistent: toTerrestrialJulianCentury (${century.toFixed(8)}) contradicts toTerrestrialJulianDay (${expectedCentury.toFixed(8)}).`
+    );
+  }
+}
+
+/**
+ * Registers an active astronomical time scale provider.
+ * When options.validate is true, verifies that the provider has consistent conversions.
+ */
+export function registerAstronomicalTimeScale(
+  provider: AstronomicalTimeScale | null,
+  options?: { validate?: boolean }
+): void {
+  if (provider !== null && options?.validate === true) {
+    validateAstronomicalTimeScale(provider);
+  }
   registeredTimeScale = provider ?? standardAstronomicalTimeScale;
   for (const listener of changeListeners) {
     listener(registeredTimeScale);

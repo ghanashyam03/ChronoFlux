@@ -17,16 +17,20 @@ export interface PlaceOptions {
   readonly longitude: number;
 
   /**
-   * Height above the WGS84 reference ellipsoid in meters.
+   * Orthometric elevation in meters above mean sea level (MSL / geoid).
    *
-   * Elevation Semantics in Solar Calculations:
+   * Elevation Datum & Horizon Dip Semantics:
+   * Place.elevationMeters represents orthometric height above mean sea level (the geoid),
+   * NOT ellipsoidal height relative to the WGS84 reference ellipsoid.
    * When specified and > 0, elevationMeters incorporates geometric horizon dip above an unobstructed
    * sea-level horizon: d_dip = (1.76 / 60) * sqrt(elevationMeters) degrees.
    * This causes sunrise to occur earlier and sunset later for elevated observers.
    *
-   * Note: This assumes an unobstructed sea-level horizon and does NOT model local terrain
-   * (mountains, valleys) or architectural obstructions (buildings), which require separate
-   * topographical obstruction / viewshed models.
+   * Explicit Boundary & Modeling Assumptions:
+   * Assumes an unobstructed geometric sea-level horizon. Does NOT model local topographical features
+   * (mountains, ridges, hills, valleys) or architectural obstructions (buildings, urban canyons),
+   * which require external viewshed and digital elevation models (DEM) and are explicitly outside
+   * the scope of this model.
    */
   readonly elevationMeters?: number;
 

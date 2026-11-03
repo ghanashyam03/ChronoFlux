@@ -18,6 +18,9 @@ import {
   SolarEventOptions,
   InstantaneousSolarPosition,
   AstronomicalTimeScale,
+  AstronomicalTimeScaleOptions,
+  createAstronomicalTimeScale,
+  validateAstronomicalTimeScale,
   getAstronomicalTimeScale,
   registerAstronomicalTimeScale,
 } from './core/models/solar/index.js';
@@ -158,10 +161,27 @@ export const ChronoFlux = Object.freeze({
     },
 
     /**
+     * Creates an astronomical time scale provider with canonical conversions.
+     */
+    createAstronomicalTimeScale(options: AstronomicalTimeScaleOptions): AstronomicalTimeScale {
+      return createAstronomicalTimeScale(options);
+    },
+
+    /**
+     * Validates an astronomical time scale provider for self-consistency.
+     */
+    validateAstronomicalTimeScale(provider: AstronomicalTimeScale, testInstant?: Instant): void {
+      validateAstronomicalTimeScale(provider, testInstant);
+    },
+
+    /**
      * Registers a pluggable astronomical time scale provider.
      */
-    registerAstronomicalTimeScale(provider: AstronomicalTimeScale | null): void {
-      registerAstronomicalTimeScale(provider);
+    registerAstronomicalTimeScale(
+      provider: AstronomicalTimeScale | null,
+      options?: { validate?: boolean }
+    ): void {
+      registerAstronomicalTimeScale(provider, options);
     },
 
     /**
