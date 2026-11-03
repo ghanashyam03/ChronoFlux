@@ -231,6 +231,85 @@ describe('Phase 3C — Temporal Intent Policies & Resolution Reports', () => {
           minDuration: 1234 as any,
         })
       ).toThrow(TypeError);
+      expect(() =>
+        ChronoFlux.resolve({
+          place: newYork,
+          within: fourDaysWindow,
+          where: businessHours,
+          minDuration: ChronoFlux.duration.seconds(-10),
+        })
+      ).toThrow(RangeError);
+    });
+
+    it('documents provenance with verified residuals on inverted / complement conditions (solar.elevation < 10°)', () => {
+      const invertedCond = Conditions.solar.elevation.lt(10);
+      const result = ChronoFlux.resolve({
+        place: newYork,
+        within: new Interval(
+          Instant.fromJSON('2026-06-21T00:00:00.000Z'),
+          Instant.fromJSON('2026-06-22T00:00:00.000Z')
+        ),
+        where: invertedCond,
+      });
+
+      // There are 2 intervals for elevation < 10°: [00:00, sunrise) and [sunset, 24:00)
+      expect(result.intervals.intervals.length).toBe(2);
+
+      // Interval 1 ends at sunrise: the sun rising closes the < 10° interval
+      const iv1 = result.report.explanations[0]!;
+      expect(iv1.endExplanation.model).toBe('solar');
+      expect(iv1.endExplanation.details?.residualDeg).toBeDefined();
+      expect(iv1.endExplanation.details!.residualDeg!).toBeLessThan(1e-5);
+      expect(iv1.endExplanation.reason).toContain('rising');
+
+      // Interval 2 starts at sunset: the sun setting opens the < 10° interval
+      const iv2 = result.report.explanations[1]!;
+      expect(iv2.startExplanation.model).toBe('solar');
+      expect(iv2.startExplanation.details?.residualDeg).toBeDefined();
+      expect(iv2.startExplanation.details!.residualDeg!).toBeLessThan(1e-5);
+      expect(iv2.startExplanation.reason).toContain('setting');
+    });
+
+    it('documents provenance on solar.elevation.between(10, 45) upper crossings', () => {
+      const betweenCond = Conditions.solar.elevation.between(10, 45);
+      const result = ChronoFlux.resolve({
+        place: newYork,
+        within: new Interval(
+          Instant.fromJSON('2026-06-21T00:00:00.000Z'),
+          Instant.fromJSON('2026-06-22T00:00:00.000Z')
+        ),
+        where: betweenCond,
+      });
+
+      // In NYC summer, peak is ~73°, so elevation passes 10° to 45° in morning, and 45° to 10° in evening (2 intervals)
+      expect(result.intervals.intervals.length).toBe(2);
+
+      // Morning interval ends when elevation crosses 45°
+      const morningIv = result.report.explanations[0]!;
+      expect(morningIv.endExplanation.model).toBe('solar');
+      expect(morningIv.endExplanation.details?.residualDeg).toBeDefined();
+      expect(morningIv.endExplanation.details!.residualDeg!).toBeLessThan(1e-5);
+      expect(morningIv.endExplanation.details?.threshold).toBe(45);
+
+      // Afternoon interval starts when elevation drops below 45°
+      const afternoonIv = result.report.explanations[1]!;
+      expect(afternoonIv.startExplanation.model).toBe('solar');
+      expect(afternoonIv.startExplanation.details?.residualDeg).toBeDefined();
+      expect(afternoonIv.startExplanation.details!.residualDeg!).toBeLessThan(1e-5);
+      expect(afternoonIv.startExplanation.details?.threshold).toBe(45);
+    });
+
+    it('preserves totalMatchesFound under earliest selection policy', () => {
+      const result = ChronoFlux.resolve({
+        place: newYork,
+        within: fourDaysWindow,
+        where: businessHours,
+        policy: 'earliest',
+      });
+
+      expect(result.intervals.intervals.length).toBe(1);
+      expect(result.allMatchingIntervals.intervals.length).toBe(4);
+      expect(result.report.totalMatchesFound).toBe(4);
     });
   });
 });

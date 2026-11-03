@@ -14,6 +14,7 @@ import {
   LogicalConditionNode,
   SolarComparisonNode,
   SolarProperty,
+  TimeUnit,
   validateConditionAST,
 } from './ast.js';
 
@@ -40,14 +41,14 @@ export interface BooleanBuilder<D extends 'solar' | 'civil'> {
 }
 
 export interface CivilNumericBuilder {
-  gt(val: number): CivilComparisonNode;
-  gte(val: number): CivilComparisonNode;
-  lt(val: number): CivilComparisonNode;
-  lte(val: number): CivilComparisonNode;
-  eq(val: number): CivilComparisonNode;
-  neq(val: number): CivilComparisonNode;
-  between(min: number, max: number): CivilComparisonNode;
-  in(vals: readonly number[]): CivilComparisonNode;
+  gt(val: number, unit?: TimeUnit): CivilComparisonNode;
+  gte(val: number, unit?: TimeUnit): CivilComparisonNode;
+  lt(val: number, unit?: TimeUnit): CivilComparisonNode;
+  lte(val: number, unit?: TimeUnit): CivilComparisonNode;
+  eq(val: number, unit?: TimeUnit): CivilComparisonNode;
+  neq(val: number, unit?: TimeUnit): CivilComparisonNode;
+  between(min: number, max: number, unit?: TimeUnit): CivilComparisonNode;
+  in(vals: readonly number[], unit?: TimeUnit): CivilComparisonNode;
 }
 
 function createAngleBuilder(property: SolarProperty): SolarAngleBuilder {
@@ -140,35 +141,40 @@ function createBooleanBuilder<D extends 'solar' | 'civil'>(
 function createCivilNumericBuilder(property: CivilProperty): CivilNumericBuilder {
   function makeNode(
     operator: ComparisonOperator,
-    value: number | readonly number[]
+    value: number | readonly number[],
+    unit?: TimeUnit
   ): CivilComparisonNode {
+    if (unit !== undefined && unit !== 'hours' && unit !== 'minutes' && unit !== 'seconds') {
+      throw new TypeError(`Invalid civil time unit: ${unit}. Expected 'hours', 'minutes', or 'seconds'.`);
+    }
     return Object.freeze({
       kind: 'comparison' as const,
       domain: 'civil' as const,
       property,
       operator,
       value: Array.isArray(value) ? Object.freeze(value.slice()) : value,
+      ...(unit !== undefined ? { unit } : {}),
     });
   }
 
   return Object.freeze({
-    gt: (val: number) => makeNode('gt', val),
-    gte: (val: number) => makeNode('gte', val),
-    lt: (val: number) => makeNode('lt', val),
-    lte: (val: number) => makeNode('lte', val),
-    eq: (val: number) => makeNode('eq', val),
-    neq: (val: number) => makeNode('neq', val),
-    between: (min: number, max: number) => {
+    gt: (val: number, unit?: TimeUnit) => makeNode('gt', val, unit),
+    gte: (val: number, unit?: TimeUnit) => makeNode('gte', val, unit),
+    lt: (val: number, unit?: TimeUnit) => makeNode('lt', val, unit),
+    lte: (val: number, unit?: TimeUnit) => makeNode('lte', val, unit),
+    eq: (val: number, unit?: TimeUnit) => makeNode('eq', val, unit),
+    neq: (val: number, unit?: TimeUnit) => makeNode('neq', val, unit),
+    between: (min: number, max: number, unit?: TimeUnit) => {
       if (typeof min !== 'number' || typeof max !== 'number' || !Number.isFinite(min) || !Number.isFinite(max)) {
         throw new TypeError(`between() requires finite numbers for min and max, received: min=${min}, max=${max}`);
       }
-      return makeNode('between', [min, max]);
+      return makeNode('between', [min, max], unit);
     },
-    in: (vals: readonly number[]) => {
+    in: (vals: readonly number[], unit?: TimeUnit) => {
       if (!Array.isArray(vals) || vals.length === 0) {
         throw new TypeError('in() requires a non-empty array of numbers');
       }
-      return makeNode('in', vals);
+      return makeNode('in', vals, unit);
     },
   });
 }

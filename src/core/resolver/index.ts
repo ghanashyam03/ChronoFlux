@@ -66,8 +66,13 @@ export function resolve(options: ResolveOptions): ResolutionResult {
 
   validateConditionAST(where);
 
-  if (minDuration !== undefined && !(minDuration instanceof Duration)) {
-    throw new TypeError('options.minDuration must be an instance of Duration');
+  if (minDuration !== undefined) {
+    if (!(minDuration instanceof Duration)) {
+      throw new TypeError('options.minDuration must be an instance of Duration');
+    }
+    if (minDuration.isNegative()) {
+      throw new RangeError('options.minDuration must be non-negative');
+    }
   }
 
   const validPolicies: readonly SelectionPolicy[] = ['all', 'earliest', 'latest', 'longest'];
@@ -88,7 +93,15 @@ export function resolve(options: ResolveOptions): ResolutionResult {
   const executionTimeMs = endMs - startMs;
 
   // 3. Assemble detailed resolution report
-  const report = buildResolutionReport(where, intervals, ctx, policy, minDuration, executionTimeMs);
+  const report = buildResolutionReport(
+    where,
+    intervals,
+    ctx,
+    policy,
+    minDuration,
+    executionTimeMs,
+    allMatchingIntervals
+  );
 
   return Object.freeze({
     intervals,

@@ -15,6 +15,8 @@ import { Place } from '../primitives/place.js';
 import { ConditionAST, formatConditionAST, ModelDomain } from './ast.js';
 import { ResolutionContext } from './engine.js';
 import { SelectionPolicy } from './intent.js';
+import { CivilBoundaryProvenance } from './solver-civil.js';
+import { SolarBoundaryProvenance } from './solver-solar.js';
 
 export interface BoundaryExplanation {
   readonly instant: Instant;
@@ -104,60 +106,80 @@ function explainBoundary(
   }
 
   // 2. Exact recorded solar crossing
-  for (const [key, record] of ctx.solarRecords) {
-    if (key.startsWith(boundaryType)) {
-      const diffNs = Math.abs(Number(record.instant.epochNanoseconds - instant.epochNanoseconds));
-      if (diffNs <= 10_000_000) { // within 10 ms
-        let extraContext = '';
-        if (ctx.modelsConsulted.has('civil')) {
-          const tz = ctx.place.timeZoneId || 'UTC';
-          const cState = civilModel.evaluate(instant, tz);
-          const tzAbbr = getTimeZoneAbbr(instant, tz);
-          extraContext = ` Civil time is ${String(cState.hour).padStart(2, '0')}:${String(cState.minute).padStart(2, '0')} ${tzAbbr}.`;
-        }
-        return Object.freeze({
-          instant,
-          boundaryType,
-          reason: `${record.reason}${extraContext}`,
-          model: 'solar' as const,
-          conditionDescription: record.conditionDescription,
-          details: Object.freeze({
-            property: record.property,
-            threshold: record.thresholdDeg,
-            actualValue: record.actualValueDeg,
-            residualDeg: record.residualDeg,
-            toleranceDeg: record.toleranceDeg,
-          }),
-        });
-      }
+  let bestSolarRecord: SolarBoundaryProvenance | null = null;
+  let bestDiffNs = 10_000_000; // 10 ms
+  for (const record of ctx.solarRecords.values()) {
+    const diff = Math.abs(Number(record.instant.epochNanoseconds - instant.epochNanoseconds));
+    if (diff < bestDiffNs) {
+      bestDiffNs = diff;
+      bestSolarRecord = record;
     }
   }
 
-  // 3. Exact recorded civil boundary
-  for (const [key, record] of ctx.civilRecords) {
-    if (key.startsWith(boundaryType)) {
-      const diffNs = Math.abs(Number(record.instant.epochNanoseconds - instant.epochNanoseconds));
-      if (diffNs <= 10_000_000) {
-        let extraContext = '';
-        if (ctx.modelsConsulted.has('solar')) {
-          const coords = computeSolarCoordinates(instant, ctx.place);
-          extraContext = ` Solar elevation is ${coords.geometricElevationDeg.toFixed(1)}°.`;
-        }
-        return Object.freeze({
-          instant,
-          boundaryType,
-          reason: `${record.reason}${extraContext}`,
-          model: 'civil' as const,
-          conditionDescription: record.conditionDescription,
-          details: Object.freeze({
-            property: record.property,
-            threshold: record.value,
-            actualValue: record.value,
-            timeZoneId: record.timeZoneId,
-          }),
-        });
+  if (bestSolarRecord) {
+    let extraContext = '';
+    if (ctx.modelsConsulted.has('civil')) {
+      const tz = ctx.place.timeZoneId || 'UTC';
+      const cState = civilModel.evaluate(instant, tz);
+      const tzAbbr = getTimeZoneAbbr(instant, tz);
+      extraContext = ` Civil time is ${String(cState.hour).padStart(2, '0')}:${String(cState.minute).padStart(2, '0')} ${tzAbbr}.`;
+    }
+
+    let reason = bestSolarRecord.reason;
+    if (bestSolarRecord.boundaryType !== boundaryType) {
+      if (bestSolarRecord.boundaryType === 'start') {
+        reason = `Solar elevation crossed threshold ${bestSolarRecord.thresholdDeg.toFixed(2)}° (rising) with numerical residual ${bestSolarRecord.residualDeg.toExponential(2)}°.`;
+      } else {
+        reason = `Solar elevation dropped below threshold ${bestSolarRecord.thresholdDeg.toFixed(2)}° (setting) with numerical residual ${bestSolarRecord.residualDeg.toExponential(2)}°.`;
       }
     }
+
+    return Object.freeze({
+      instant,
+      boundaryType,
+      reason: `${reason}${extraContext}`,
+      model: 'solar' as const,
+      conditionDescription: bestSolarRecord.conditionDescription,
+      details: Object.freeze({
+        property: bestSolarRecord.property,
+        threshold: bestSolarRecord.thresholdDeg,
+        actualValue: bestSolarRecord.actualValueDeg,
+        residualDeg: bestSolarRecord.residualDeg,
+        toleranceDeg: bestSolarRecord.toleranceDeg,
+      }),
+    });
+  }
+
+  // 3. Exact recorded civil boundary
+  let bestCivilRecord: CivilBoundaryProvenance | null = null;
+  let bestCivilDiffNs = 10_000_000; // 10 ms
+  for (const record of ctx.civilRecords.values()) {
+    const diff = Math.abs(Number(record.instant.epochNanoseconds - instant.epochNanoseconds));
+    if (diff < bestCivilDiffNs) {
+      bestCivilDiffNs = diff;
+      bestCivilRecord = record;
+    }
+  }
+
+  if (bestCivilRecord) {
+    let extraContext = '';
+    if (ctx.modelsConsulted.has('solar')) {
+      const coords = computeSolarCoordinates(instant, ctx.place);
+      extraContext = ` Solar elevation is ${coords.geometricElevationDeg.toFixed(1)}°.`;
+    }
+    return Object.freeze({
+      instant,
+      boundaryType,
+      reason: `${bestCivilRecord.reason}${extraContext}`,
+      model: 'civil' as const,
+      conditionDescription: bestCivilRecord.conditionDescription,
+      details: Object.freeze({
+        property: bestCivilRecord.property,
+        threshold: bestCivilRecord.value,
+        actualValue: bestCivilRecord.value,
+        timeZoneId: bestCivilRecord.timeZoneId,
+      }),
+    });
   }
 
   // 4. Inferred boundary from models consulted
@@ -165,9 +187,10 @@ function explainBoundary(
   const civilState = civilModel.evaluate(instant, tz);
   const coords = computeSolarCoordinates(instant, ctx.place);
 
-  if (ctx.modelsConsulted.has('civil') && civilState.minute === 0 && civilState.second === 0) {
+  if (ctx.modelsConsulted.has('civil')) {
     const tzAbbr = getTimeZoneAbbr(instant, tz);
     const hourStr = String(civilState.hour).padStart(2, '0');
+    const minStr = String(civilState.minute).padStart(2, '0');
     let extraContext = '';
     if (ctx.modelsConsulted.has('solar')) {
       extraContext = ` Solar elevation is ${coords.geometricElevationDeg >= 0 ? '' : '-'}${Math.abs(coords.geometricElevationDeg).toFixed(1)}°.`;
@@ -177,8 +200,8 @@ function explainBoundary(
       boundaryType,
       reason:
         boundaryType === 'start'
-          ? `Civil time entered business hours (${hourStr}:00 ${tzAbbr}) in ${tz}.${extraContext}`
-          : `Civil time exited business hours (${hourStr}:00 ${tzAbbr}) in ${tz}.${extraContext}`,
+          ? `Civil time entered matching civil state (${hourStr}:${minStr} ${tzAbbr}) in ${tz}.${extraContext}`
+          : `Civil time exited matching civil state (${hourStr}:${minStr} ${tzAbbr}) in ${tz}.${extraContext}`,
       model: 'civil' as const,
       conditionDescription: `civil.hour ${boundaryType === 'start' ? '>=' : '<'} ${civilState.hour}`,
       details: Object.freeze({
@@ -225,7 +248,8 @@ export function buildResolutionReport(
   ctx: ResolutionContext,
   policy: SelectionPolicy = 'all',
   minDuration: Duration | undefined,
-  executionTimeMs: number
+  executionTimeMs: number,
+  allMatchingIntervals?: IntervalSet
 ): ResolutionReport {
   const explanations: IntervalExplanation[] = [];
 
@@ -247,6 +271,10 @@ export function buildResolutionReport(
     SOLAR_MODEL_VALIDITY_RANGE.contains(ctx.within.start) &&
     SOLAR_MODEL_VALIDITY_RANGE.contains(ctx.within.end);
 
+  const totalMatchesFound = allMatchingIntervals
+    ? allMatchingIntervals.intervals.length
+    : intervals.intervals.length;
+
   const report: ResolutionReport = Object.freeze({
     query: formatConditionAST(ast),
     searchWindow: ctx.within,
@@ -255,7 +283,7 @@ export function buildResolutionReport(
     ...(minDuration !== undefined ? { minDuration } : {}),
     modelsConsulted: Object.freeze(Array.from(ctx.modelsConsulted)),
     explanations: Object.freeze(explanations),
-    totalMatchesFound: intervals.intervals.length,
+    totalMatchesFound,
     executionTimeMs: Math.round(executionTimeMs * 100) / 100,
     accuracy: Object.freeze({
       solarNumericalToleranceDeg: 1e-5,

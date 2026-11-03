@@ -247,5 +247,123 @@ describe('Phase 3B — Discrete Civil Condition Solver', () => {
       });
       expect(isDst.intervals.intervals.length).toBe(1);
     });
+
+    it('resolves civil minute queries correctly (between, eq, gte, lt) and composes with hour', () => {
+      const twoHourWindow = new Interval(
+        Instant.fromJSON('2026-06-21T13:00:00.000Z'), // 09:00 EDT
+        Instant.fromJSON('2026-06-21T15:00:00.000Z')  // 11:00 EDT
+      );
+
+      // 1. minute between 0 and 30: exactly 2 half-hour intervals (09:00-09:30 and 10:00-10:30)
+      const minBetween = ChronoFlux.resolve({
+        place: newYork,
+        within: twoHourWindow,
+        where: Conditions.civil.minute.between(0, 30),
+      });
+      expect(minBetween.intervals.intervals.length).toBe(2);
+      expect(minBetween.intervals.intervals[0]!.duration.totalMinutes).toBe(30);
+      expect(minBetween.intervals.intervals[1]!.duration.totalMinutes).toBe(30);
+
+      // 2. minute.eq(15): exactly 2 1-minute intervals (09:15-09:16 and 10:15-10:16)
+      const minEq = ChronoFlux.resolve({
+        place: newYork,
+        within: twoHourWindow,
+        where: Conditions.civil.minute.eq(15),
+      });
+      expect(minEq.intervals.intervals.length).toBe(2);
+      expect(minEq.intervals.intervals[0]!.duration.totalMinutes).toBe(1);
+
+      // 3. Composition: civil.hour == 9 AND civil.minute between 15 and 45 -> [09:15, 09:45)
+      const compound = ChronoFlux.resolve({
+        place: newYork,
+        within: twoHourWindow,
+        where: Conditions.and(
+          Conditions.civil.hour.eq(9),
+          Conditions.civil.minute.between(15, 45)
+        ),
+      });
+      expect(compound.intervals.intervals.length).toBe(1);
+      const resInterval = compound.intervals.intervals[0]!;
+      expect(resInterval.duration.totalMinutes).toBe(30);
+      expect(resInterval.start.toISOString()).toBe('2026-06-21T13:15:00.000Z');
+      expect(resInterval.end.toISOString()).toBe('2026-06-21T13:45:00.000Z');
+    });
+
+    it('resolves civil second queries and rejects windows exceeding 2 days', () => {
+      const tenMinWindow = new Interval(
+        Instant.fromJSON('2026-06-21T13:00:00.000Z'),
+        Instant.fromJSON('2026-06-21T13:10:00.000Z')
+      );
+
+      const secBetween = ChronoFlux.resolve({
+        place: newYork,
+        within: tenMinWindow,
+        where: Conditions.civil.second.between(0, 30),
+      });
+      expect(secBetween.intervals.intervals.length).toBe(10);
+      for (const iv of secBetween.intervals.intervals) {
+        expect(iv.duration.totalSeconds).toBe(30);
+      }
+
+      // Rejects window > 2 days for second property
+      const largeWindow = new Interval(
+        Instant.fromJSON('2026-06-21T00:00:00.000Z'),
+        Instant.fromJSON('2026-06-25T00:00:00.000Z')
+      );
+      expect(() =>
+        ChronoFlux.resolve({
+          place: newYork,
+          within: largeWindow,
+          where: Conditions.civil.second.eq(0),
+        })
+      ).toThrow(RangeError);
+    });
+
+    it('resolves hour.neq and hour.between up to 24 without RangeError', () => {
+      const singleDay = new Interval(
+        Instant.fromJSON('2026-06-21T04:00:00.000Z'), // 00:00 EDT
+        Instant.fromJSON('2026-06-22T04:00:00.000Z')  // 24:00 EDT
+      );
+
+      // 1. hour.neq(12): excludes 12:00-13:00, producing two intervals: [00:00, 12:00) and [13:00, 24:00)
+      const neq12 = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.civil.hour.neq(12),
+      });
+      expect(neq12.intervals.intervals.length).toBe(2);
+      expect(neq12.intervals.intervals[0]!.duration.totalHours).toBe(12);
+      expect(neq12.intervals.intervals[1]!.duration.totalHours).toBe(11);
+
+      // 2. hour.between(9, 24): from 09:00 to 24:00 (15 hours)
+      const upTo24 = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.civil.hour.between(9, 24),
+      });
+      expect(upTo24.intervals.intervals.length).toBe(1);
+      expect(upTo24.intervals.intervals[0]!.duration.totalHours).toBe(15);
+      expect(upTo24.intervals.intervals[0]!.end.toISOString()).toBe('2026-06-22T04:00:00.000Z');
+    });
+
+    it('resolves DST transition accurately across transition boundaries', () => {
+      // Spring forward in New York: March 8, 2026 (02:00 EDT skipped, clocks jump to 03:00 EDT)
+      const transitionWindow = new Interval(
+        Instant.fromJSON('2026-03-08T00:00:00.000Z'),
+        Instant.fromJSON('2026-03-09T00:00:00.000Z')
+      );
+
+      const dstOn = ChronoFlux.resolve({
+        place: newYork,
+        within: transitionWindow,
+        where: Conditions.civil.isDaylightSaving.eq(true),
+      });
+
+      // DST begins during March 8 (at 07:00 UTC = 03:00 EDT)
+      expect(dstOn.intervals.intervals.length).toBe(1);
+      const dstInterval = dstOn.intervals.intervals[0]!;
+      expect(dstInterval.start.toISOString()).toBe('2026-03-08T07:00:00.000Z');
+      expect(dstInterval.end.toISOString()).toBe('2026-03-09T00:00:00.000Z');
+    });
   });
 });

@@ -408,7 +408,8 @@ function solvePolarRegimeCondition(
 function solveAzimuthCondition(
   node: SolarComparisonNode,
   place: Place,
-  window: Interval
+  window: Interval,
+  boundaryRecordMap?: Map<string, SolarBoundaryProvenance>
 ): IntervalSet {
   const { operator, value, unit } = node;
   const toDeg = (v: number) => {
@@ -450,33 +451,103 @@ function solveAzimuthCondition(
     }
   }
 
+  function bisectAzimuthCrossing(
+    lowNs: bigint,
+    highNs: bigint,
+    targetMatch: boolean
+  ): Instant {
+    let a = lowNs;
+    let b = highNs;
+    for (let iter = 0; iter < 45; iter++) {
+      const mid = (a + b) / 2n;
+      const c = computeSolarCoordinates(Instant.fromEpochNanoseconds(mid), place);
+      const m = c.azimuthDeg !== null && matches(c.azimuthDeg);
+      if (m === targetMatch) {
+        b = mid;
+      } else {
+        a = mid;
+      }
+    }
+    return Instant.fromEpochNanoseconds(b);
+  }
+
   let inMatch = false;
   let matchStart: Instant | null = null;
   const startNs = window.start.epochNanoseconds;
   const endNs = window.end.epochNanoseconds;
+  let prevInstant = window.start;
 
-  for (let currentNs = startNs; currentNs < endNs; currentNs += stepNs) {
-    const curInstant = Instant.fromEpochNanoseconds(currentNs);
+  // Initial state check at window start
+  const initialCoords = computeSolarCoordinates(window.start, place);
+  if (initialCoords.azimuthDeg !== null && matches(initialCoords.azimuthDeg)) {
+    inMatch = true;
+    matchStart = window.start;
+  }
+
+  for (let currentNs = startNs + stepNs; currentNs <= endNs + stepNs; currentNs += stepNs) {
+    const curNsClamped = currentNs > endNs ? endNs : currentNs;
+    const curInstant = Instant.fromEpochNanoseconds(curNsClamped);
     const coords = computeSolarCoordinates(curInstant, place);
     const curMatch = coords.azimuthDeg !== null && matches(coords.azimuthDeg);
 
     if (curMatch && !inMatch) {
       inMatch = true;
-      matchStart = curInstant;
+      const exactStart = bisectAzimuthCrossing(prevInstant.epochNanoseconds, curInstant.epochNanoseconds, true);
+      matchStart = exactStart;
+      if (boundaryRecordMap && exactStart.isAfter(window.start)) {
+        const c = computeSolarCoordinates(exactStart, place);
+        const az = c.azimuthDeg ?? 0;
+        const target = typeof value === 'number' ? toDeg(value) : 0;
+        boundaryRecordMap.set(`start:${exactStart.epochNanoseconds}`, {
+          instant: exactStart,
+          boundaryType: 'start',
+          property: 'azimuth',
+          thresholdDeg: target,
+          residualDeg: Math.abs(az - target),
+          toleranceDeg: SOLVER_TOLERANCE_DEG,
+          actualValueDeg: az,
+          reason: `Solar azimuth entered matching condition (${az.toFixed(2)}°).`,
+          conditionDescription: `solar.azimuth ${operator} ${target.toFixed(2)}°`,
+        });
+      }
     } else if (!curMatch && inMatch) {
       inMatch = false;
-      if (matchStart !== null && matchStart.isBefore(curInstant)) {
-        matchingIntervals.push(new Interval(matchStart, curInstant));
+      const exactEnd = bisectAzimuthCrossing(prevInstant.epochNanoseconds, curInstant.epochNanoseconds, false);
+      if (matchStart !== null && matchStart.isBefore(exactEnd)) {
+        matchingIntervals.push(new Interval(matchStart, exactEnd));
+        if (boundaryRecordMap && exactEnd.isBefore(window.end)) {
+          const c = computeSolarCoordinates(exactEnd, place);
+          const az = c.azimuthDeg ?? 0;
+          const target = typeof value === 'number' ? toDeg(value) : 0;
+          boundaryRecordMap.set(`end:${exactEnd.epochNanoseconds}`, {
+            instant: exactEnd,
+            boundaryType: 'end',
+            property: 'azimuth',
+            thresholdDeg: target,
+            residualDeg: Math.abs(az - target),
+            toleranceDeg: SOLVER_TOLERANCE_DEG,
+            actualValueDeg: az,
+            reason: `Solar azimuth exited matching condition (${az.toFixed(2)}°).`,
+            conditionDescription: `solar.azimuth ${operator} ${target.toFixed(2)}°`,
+          });
+        }
       }
       matchStart = null;
     }
+
+    prevInstant = curInstant;
+    if (curNsClamped === endNs) break;
   }
 
   if (inMatch && matchStart !== null && matchStart.isBefore(window.end)) {
     matchingIntervals.push(new Interval(matchStart, window.end));
   }
 
-  return IntervalSet.from(matchingIntervals);
+  if (matchingIntervals.length === 0) {
+    return IntervalSet.empty();
+  }
+
+  return IntervalSet.from(matchingIntervals).intersect(window);
 }
 
 /**
@@ -500,7 +571,7 @@ export function solveSolarCondition(
     case 'polarRegime':
       return solvePolarRegimeCondition(node, place, window);
     case 'azimuth':
-      return solveAzimuthCondition(node, place, window);
+      return solveAzimuthCondition(node, place, window, boundaryRecordMap);
     default:
       throw new TypeError(`Unsupported solar property: ${node.property}`);
   }

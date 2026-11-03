@@ -265,6 +265,22 @@ describe('Phase 3B — Continuous Solar Condition Solver', () => {
         expect(coords.azimuthDeg).toBeGreaterThanOrEqual(90);
         expect(coords.azimuthDeg).toBeLessThanOrEqual(270);
       }
+
+      // Verify exact crossing root accuracy for continuous azimuth
+      const southCrossing = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.solar.azimuth.gte(180),
+      });
+      // In 04:00Z-04:00Z window (NYC EDT): interval 1 is pre-midnight (~04:00-04:56Z where azimuth ~340°-360°),
+      // interval 2 is post-noon crossing from 180° onward.
+      expect(southCrossing.intervals.intervals.length).toBe(2);
+      const noonCrossing = southCrossing.intervals.intervals[1]!;
+      const startCrossingCoords = ChronoFlux.solar.evaluatePosition(noonCrossing.start, newYork);
+      expect(Math.abs(startCrossingCoords.azimuthDeg! - 180)).toBeLessThan(1e-4);
+      expect(southCrossing.report.explanations[1]!.startExplanation.model).toBe('solar');
+      expect(southCrossing.report.explanations[1]!.startExplanation.details?.residualDeg).toBeDefined();
+      expect(southCrossing.report.explanations[1]!.startExplanation.details!.residualDeg!).toBeLessThan(1e-4);
     });
 
     it('solves phase.in and phase.neq', () => {

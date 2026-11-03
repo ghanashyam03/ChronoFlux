@@ -26,6 +26,9 @@ export function applyIntentPolicy(
     if (!(minDuration instanceof Duration)) {
       throw new TypeError('Expected minDuration to be an instance of Duration');
     }
+    if (minDuration.isNegative()) {
+      throw new RangeError('minDuration must be non-negative');
+    }
     candidates = candidates.filter((interval) => !interval.duration.isLessThan(minDuration));
   }
 

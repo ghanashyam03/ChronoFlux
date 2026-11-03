@@ -102,6 +102,22 @@ describe('Phase 3A — Condition AST and Fluent Builder', () => {
         operator: 'eq',
         value: true,
       });
+
+      // Unit preservation on civil builder
+      const hoursWithUnit = Conditions.civil.hour.between(9, 17, 'hours');
+      expect(hoursWithUnit).toEqual({
+        kind: 'comparison',
+        domain: 'civil',
+        property: 'hour',
+        operator: 'between',
+        value: [9, 17],
+        unit: 'hours',
+      });
+
+      const minutesWithUnit = Conditions.civil.minute.gte(30, 'minutes');
+      expect(minutesWithUnit.unit).toBe('minutes');
+
+      expect(() => (Conditions.civil.hour as any).between(9, 17, 'invalid')).toThrow(TypeError);
     });
 
     it('constructs logical compositions (AND, OR, NOT)', () => {
