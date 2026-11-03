@@ -9,7 +9,7 @@ import { Interval } from '../primitives/interval.js';
 import { IntervalSet } from '../primitives/interval-set.js';
 import { Place } from '../primitives/place.js';
 import { ConditionAST, ModelDomain } from './ast.js';
-import { solveCivilCondition, CivilBoundaryProvenance } from './solver-civil.js';
+import { solveCivilCondition, CivilBoundaryProvenance, getEffectiveTimeZoneId } from './solver-civil.js';
 import { solveSolarCondition, SolarBoundaryProvenance } from './solver-solar.js';
 
 export interface ResolutionContext {
@@ -67,6 +67,7 @@ export function resolveAST(node: ConditionAST, ctx: ResolutionContext): Interval
       return solveSolarCondition(node, ctx.place, ctx.within, ctx.solarRecords);
     }
     if (node.domain === 'civil') {
+      getEffectiveTimeZoneId(ctx.place);
       ctx.modelsConsulted.add('civil');
       return solveCivilCondition(node, ctx.place, ctx.within, ctx.civilRecords);
     }

@@ -303,5 +303,107 @@ describe('Phase 3B — Continuous Solar Condition Solver', () => {
       });
       expect(nonDay.intervals.intervals.length).toBeGreaterThan(0);
     });
+
+    it('resolves solar-only queries on Place without timeZoneId cleanly', () => {
+      const placeNoTz = new Place({
+        latitude: 40.7128,
+        longitude: -74.006,
+      });
+      const singleDay = new Interval(
+        Instant.fromJSON('2026-06-21T00:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T00:00:00.000Z')
+      );
+
+      const result = ChronoFlux.resolve({
+        place: placeNoTz,
+        within: singleDay,
+        where: Conditions.solar.elevation.gte(10),
+      });
+
+      expect(result.intervals.intervals.length).toBe(1);
+      expect(result.report).toBeDefined();
+      expect(result.report.accuracy.solarNumericalToleranceDeg).toBe(1e-5);
+      expect(result.report.accuracy.timeZoneId).toBeUndefined();
+      expect(result.report.accuracy.civilResolution).toBeUndefined();
+      expect(result.report.explanations[0]!.startExplanation.model).toBe('solar');
+      expect(result.report.explanations[0]!.startExplanation.details?.timeZoneId).toBeUndefined();
+    });
+
+    it('distinguishes continuous azimuth threshold crossings from 360°/0° North branch cut wraps in provenance report', () => {
+      const singleDay = new Interval(
+        Instant.fromJSON('2026-06-21T04:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T04:00:00.000Z')
+      );
+
+      const result = ChronoFlux.resolve({
+        place: newYork,
+        within: singleDay,
+        where: Conditions.solar.azimuth.gte(180),
+      });
+
+      expect(result.intervals.intervals.length).toBe(2);
+
+      // Interval 0 ends when azimuth reaches 360°/0° North wrap
+      const wrapExp = result.report.explanations[0]!.endExplanation;
+      expect(wrapExp.details?.isWrapBoundary).toBe(true);
+      expect(wrapExp.details?.boundaryCategory).toBe('azimuth_wrap');
+      expect(wrapExp.details?.residualDeg).toBeUndefined();
+      expect(wrapExp.reason).toContain('azimuth wrapped');
+
+      // Interval 1 starts at the continuous 180° threshold crossing
+      const crossingExp = result.report.explanations[1]!.startExplanation;
+      expect(crossingExp.details?.isWrapBoundary).toBe(false);
+      expect(crossingExp.details?.boundaryCategory).toBe('threshold_crossing');
+      expect(crossingExp.details?.residualDeg).toBeDefined();
+      expect(crossingExp.details!.residualDeg!).toBeLessThan(1e-4);
+    });
+
+    it('resolves polarRegime.in on high-latitude locations (Tromsø midnight sun)', () => {
+      const tromso = new Place({
+        latitude: 69.6492,
+        longitude: 18.9553,
+        timeZoneId: 'Europe/Oslo',
+      });
+      const solsticeWindow = new Interval(
+        Instant.fromJSON('2026-06-20T00:00:00.000Z'),
+        Instant.fromJSON('2026-06-23T00:00:00.000Z')
+      );
+
+      const result = ChronoFlux.resolve({
+        place: tromso,
+        within: solsticeWindow,
+        where: Conditions.solar.polarRegime.in(['polar_day', 'polar_night']),
+      });
+
+      // Tromsø experiences 24-hour midnight sun (polar_day) across the entire June solstice
+      expect(result.intervals.intervals.length).toBe(1);
+      expect(result.intervals.intervals[0]!.equals(solsticeWindow)).toBe(true);
+    });
+
+    it('resolves near-zenith high elevation conditions in tropical latitudes (Singapore equinox)', () => {
+      const singapore = new Place({
+        latitude: 1.3521,
+        longitude: 103.8198,
+        timeZoneId: 'Asia/Singapore',
+      });
+      const equinoxWindow = new Interval(
+        Instant.fromJSON('2026-03-21T00:00:00.000Z'),
+        Instant.fromJSON('2026-03-22T00:00:00.000Z')
+      );
+
+      const result = ChronoFlux.resolve({
+        place: singapore,
+        within: equinoxWindow,
+        where: Conditions.solar.elevation.gte(85),
+      });
+
+      expect(result.intervals.intervals.length).toBe(1);
+      const iv = result.intervals.intervals[0]!;
+      expect(iv.duration.totalMinutes).toBeGreaterThan(15);
+      expect(iv.duration.totalMinutes).toBeLessThan(60);
+
+      const startPos = ChronoFlux.solar.evaluatePosition(iv.start, singapore);
+      expect(Math.abs(startPos.geometricElevationDeg - 85.0)).toBeLessThan(1e-5);
+    });
   });
 });

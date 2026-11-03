@@ -15,7 +15,7 @@ import { Place } from '../primitives/place.js';
 import { ConditionAST, formatConditionAST, ModelDomain } from './ast.js';
 import { ResolutionContext } from './engine.js';
 import { SelectionPolicy } from './intent.js';
-import { CivilBoundaryProvenance } from './solver-civil.js';
+import { CivilBoundaryProvenance, getEffectiveTimeZoneId } from './solver-civil.js';
 import { SolarBoundaryProvenance } from './solver-solar.js';
 
 export interface BoundaryExplanation {
@@ -32,6 +32,8 @@ export interface BoundaryExplanation {
     readonly toleranceDeg?: number;
     readonly timeZoneId?: string;
     readonly isWindowBoundary?: boolean;
+    readonly isWrapBoundary?: boolean;
+    readonly boundaryCategory?: string;
   };
 }
 
@@ -53,9 +55,11 @@ export interface ResolutionReport {
   readonly totalMatchesFound: number;
   readonly executionTimeMs: number;
   readonly accuracy: {
-    readonly solarNumericalToleranceDeg: number;
-    readonly isWithinValidityRange: boolean;
-    readonly isAccuracyDegraded: boolean;
+    readonly solarNumericalToleranceDeg?: number;
+    readonly isWithinValidityRange?: boolean;
+    readonly isAccuracyDegraded?: boolean;
+    readonly civilResolution?: string;
+    readonly timeZoneId?: string;
   };
 }
 
@@ -119,20 +123,40 @@ function explainBoundary(
   if (bestSolarRecord) {
     let extraContext = '';
     if (ctx.modelsConsulted.has('civil')) {
-      const tz = ctx.place.timeZoneId || 'UTC';
+      const tz = getEffectiveTimeZoneId(ctx.place);
       const cState = civilModel.evaluate(instant, tz);
       const tzAbbr = getTimeZoneAbbr(instant, tz);
       extraContext = ` Civil time is ${String(cState.hour).padStart(2, '0')}:${String(cState.minute).padStart(2, '0')} ${tzAbbr}.`;
     }
 
     let reason = bestSolarRecord.reason;
-    if (bestSolarRecord.boundaryType !== boundaryType) {
+    if (!bestSolarRecord.isWrapBoundary && bestSolarRecord.boundaryType !== boundaryType) {
       if (bestSolarRecord.boundaryType === 'start') {
-        reason = `Solar elevation crossed threshold ${bestSolarRecord.thresholdDeg.toFixed(2)}° (rising) with numerical residual ${bestSolarRecord.residualDeg.toExponential(2)}°.`;
+        reason = `Solar elevation crossed threshold ${bestSolarRecord.thresholdDeg.toFixed(2)}° (rising) with numerical residual ${bestSolarRecord.residualDeg !== undefined ? bestSolarRecord.residualDeg.toExponential(2) : '0'}°.`;
       } else {
-        reason = `Solar elevation dropped below threshold ${bestSolarRecord.thresholdDeg.toFixed(2)}° (setting) with numerical residual ${bestSolarRecord.residualDeg.toExponential(2)}°.`;
+        reason = `Solar elevation dropped below threshold ${bestSolarRecord.thresholdDeg.toFixed(2)}° (setting) with numerical residual ${bestSolarRecord.residualDeg !== undefined ? bestSolarRecord.residualDeg.toExponential(2) : '0'}°.`;
       }
     }
+
+    const details: {
+      property?: string;
+      threshold?: number | string | boolean;
+      actualValue?: number | string | boolean;
+      residualDeg?: number;
+      toleranceDeg?: number;
+      timeZoneId?: string;
+      isWindowBoundary?: boolean;
+      isWrapBoundary?: boolean;
+      boundaryCategory?: string;
+    } = {
+      property: bestSolarRecord.property,
+      threshold: bestSolarRecord.thresholdDeg,
+      actualValue: bestSolarRecord.actualValueDeg,
+      ...(bestSolarRecord.residualDeg !== undefined ? { residualDeg: bestSolarRecord.residualDeg } : {}),
+      ...(bestSolarRecord.toleranceDeg !== undefined ? { toleranceDeg: bestSolarRecord.toleranceDeg } : {}),
+      ...(bestSolarRecord.isWrapBoundary !== undefined ? { isWrapBoundary: bestSolarRecord.isWrapBoundary } : {}),
+      ...(bestSolarRecord.boundaryCategory !== undefined ? { boundaryCategory: bestSolarRecord.boundaryCategory } : {}),
+    };
 
     return Object.freeze({
       instant,
@@ -140,13 +164,7 @@ function explainBoundary(
       reason: `${reason}${extraContext}`,
       model: 'solar' as const,
       conditionDescription: bestSolarRecord.conditionDescription,
-      details: Object.freeze({
-        property: bestSolarRecord.property,
-        threshold: bestSolarRecord.thresholdDeg,
-        actualValue: bestSolarRecord.actualValueDeg,
-        residualDeg: bestSolarRecord.residualDeg,
-        toleranceDeg: bestSolarRecord.toleranceDeg,
-      }),
+      details: Object.freeze(details),
     });
   }
 
@@ -183,16 +201,15 @@ function explainBoundary(
   }
 
   // 4. Inferred boundary from models consulted
-  const tz = ctx.place.timeZoneId || 'UTC';
-  const civilState = civilModel.evaluate(instant, tz);
-  const coords = computeSolarCoordinates(instant, ctx.place);
-
   if (ctx.modelsConsulted.has('civil')) {
+    const tz = getEffectiveTimeZoneId(ctx.place);
+    const civilState = civilModel.evaluate(instant, tz);
     const tzAbbr = getTimeZoneAbbr(instant, tz);
     const hourStr = String(civilState.hour).padStart(2, '0');
     const minStr = String(civilState.minute).padStart(2, '0');
     let extraContext = '';
     if (ctx.modelsConsulted.has('solar')) {
+      const coords = computeSolarCoordinates(instant, ctx.place);
       extraContext = ` Solar elevation is ${coords.geometricElevationDeg >= 0 ? '' : '-'}${Math.abs(coords.geometricElevationDeg).toFixed(1)}°.`;
     }
     return Object.freeze({
@@ -214,6 +231,7 @@ function explainBoundary(
   }
 
   if (ctx.modelsConsulted.has('solar')) {
+    const coords = computeSolarCoordinates(instant, ctx.place);
     return Object.freeze({
       instant,
       boundaryType,
@@ -267,9 +285,34 @@ export function buildResolutionReport(
     );
   }
 
-  const isWithinValidityRange =
-    SOLAR_MODEL_VALIDITY_RANGE.contains(ctx.within.start) &&
-    SOLAR_MODEL_VALIDITY_RANGE.contains(ctx.within.end);
+  const hasSolar = ctx.modelsConsulted.has('solar');
+  const hasCivil = ctx.modelsConsulted.has('civil');
+
+  let accuracy: ResolutionReport['accuracy'];
+  if (hasSolar) {
+    const isWithinValidityRange =
+      SOLAR_MODEL_VALIDITY_RANGE.contains(ctx.within.start) &&
+      SOLAR_MODEL_VALIDITY_RANGE.contains(ctx.within.end);
+
+    accuracy = Object.freeze({
+      solarNumericalToleranceDeg: 1e-5,
+      isWithinValidityRange,
+      isAccuracyDegraded: !isWithinValidityRange,
+      ...(hasCivil
+        ? {
+            civilResolution: 'Exact integer calendar boundary (0 numerical residual)',
+            timeZoneId: getEffectiveTimeZoneId(ctx.place),
+          }
+        : {}),
+    });
+  } else if (hasCivil) {
+    accuracy = Object.freeze({
+      civilResolution: 'Exact integer calendar boundary (0 numerical residual)',
+      timeZoneId: getEffectiveTimeZoneId(ctx.place),
+    });
+  } else {
+    accuracy = Object.freeze({});
+  }
 
   const totalMatchesFound = allMatchingIntervals
     ? allMatchingIntervals.intervals.length
@@ -285,11 +328,7 @@ export function buildResolutionReport(
     explanations: Object.freeze(explanations),
     totalMatchesFound,
     executionTimeMs: Math.round(executionTimeMs * 100) / 100,
-    accuracy: Object.freeze({
-      solarNumericalToleranceDeg: 1e-5,
-      isWithinValidityRange,
-      isAccuracyDegraded: !isWithinValidityRange,
-    }),
+    accuracy,
   });
 
   return report;

@@ -32,11 +32,13 @@ export interface SolarBoundaryProvenance {
   readonly boundaryType: 'start' | 'end';
   readonly property: SolarProperty;
   readonly thresholdDeg: number;
-  readonly residualDeg: number;
-  readonly toleranceDeg: number;
+  readonly residualDeg?: number | undefined;
+  readonly toleranceDeg?: number | undefined;
   readonly actualValueDeg: number;
   readonly reason: string;
   readonly conditionDescription: string;
+  readonly isWrapBoundary?: boolean | undefined;
+  readonly boundaryCategory?: 'threshold_crossing' | 'azimuth_wrap' | undefined;
 }
 
 /**
@@ -372,7 +374,9 @@ function solvePolarRegimeCondition(
   place: Place,
   window: Interval
 ): IntervalSet {
-  const targetRegime = String(node.value);
+  const targetRegimes = Array.isArray(node.value)
+    ? (node.value as readonly string[]).map(String)
+    : [String(node.value)];
   const noons = findDiurnalNoons(place, window);
   const intervals: Interval[] = [];
 
@@ -389,9 +393,11 @@ function solvePolarRegimeCondition(
     const regime = evaluatePolarRegime(place, noon);
     const matches =
       node.operator === 'eq'
-        ? regime.polarRegime === targetRegime
+        ? regime.polarRegime === targetRegimes[0]
         : node.operator === 'neq'
-        ? regime.polarRegime !== targetRegime
+        ? regime.polarRegime !== targetRegimes[0]
+        : node.operator === 'in'
+        ? targetRegimes.includes(regime.polarRegime)
         : false;
 
     if (matches) {
@@ -404,6 +410,8 @@ function solvePolarRegimeCondition(
 
 /**
  * Continuous root finding for azimuth conditions.
+ * Correctly distinguishes genuine continuous threshold crossings A(t) = theta
+ * from 360°/0° branch cut wraps through North.
  */
 function solveAzimuthCondition(
   node: SolarComparisonNode,
@@ -418,8 +426,9 @@ function solveAzimuthCondition(
     return d < 0 ? d + 360 : d;
   };
 
-  // Sample azimuth in 30-minute steps across search window to locate candidate crossing brackets
-  const stepNs = 1_800_000_000_000n; // 30 minutes
+  // 10-minute step sampling across search window to locate candidate crossing brackets
+  // across all latitudes and rapid near-zenith crossings
+  const stepNs = 600_000_000_000n; // 10 minutes
   const matchingIntervals: Interval[] = [];
 
   function matches(azimuth: number): boolean {
@@ -443,6 +452,7 @@ function solveAzimuthCondition(
         return azimuth >= minD || azimuth <= maxD;
       }
       case 'eq':
+        // Isolated scalar points have measure zero in half-open intervals
         return false;
       case 'neq':
         return true;
@@ -458,7 +468,7 @@ function solveAzimuthCondition(
   ): Instant {
     let a = lowNs;
     let b = highNs;
-    for (let iter = 0; iter < 45; iter++) {
+    for (let iter = 0; iter < 48; iter++) {
       const mid = (a + b) / 2n;
       const c = computeSolarCoordinates(Instant.fromEpochNanoseconds(mid), place);
       const m = c.azimuthDeg !== null && matches(c.azimuthDeg);
@@ -469,6 +479,71 @@ function solveAzimuthCondition(
       }
     }
     return Instant.fromEpochNanoseconds(b);
+  }
+
+  function classifyAzimuthBoundary(
+    exactInstant: Instant,
+    boundaryType: 'start' | 'end'
+  ): {
+    isWrapBoundary: boolean;
+    boundaryCategory: 'threshold_crossing' | 'azimuth_wrap';
+    thresholdDeg: number;
+    actualValueDeg: number;
+    residualDeg?: number;
+    toleranceDeg?: number;
+    reason: string;
+    conditionDescription: string;
+  } {
+    const testDeltaNs = 2_000_000_000n; // 2 seconds
+    const tBefore = Instant.fromEpochNanoseconds(exactInstant.epochNanoseconds - testDeltaNs);
+    const tAfter = Instant.fromEpochNanoseconds(exactInstant.epochNanoseconds + testDeltaNs);
+    const azBefore = computeSolarCoordinates(tBefore, place).azimuthDeg;
+    const azAfter = computeSolarCoordinates(tAfter, place).azimuthDeg;
+    const azExact = computeSolarCoordinates(exactInstant, place).azimuthDeg ?? 0;
+
+    const isWrap =
+      azBefore !== null &&
+      azAfter !== null &&
+      (Math.abs(azAfter - azBefore) > 180 ||
+        (azBefore > 350 && azAfter < 10) ||
+        (azBefore < 10 && azAfter > 350));
+
+    if (isWrap) {
+      return {
+        isWrapBoundary: true,
+        boundaryCategory: 'azimuth_wrap',
+        thresholdDeg: 0,
+        actualValueDeg: azExact,
+        reason: 'Solar azimuth wrapped through North (360°/0° branch cut).',
+        conditionDescription: 'solar.azimuth azimuth_wrap',
+      };
+    }
+
+    let theta = 0;
+    if (operator === 'between') {
+      const [minV, maxV] = value as readonly [number, number];
+      const minD = toDeg(minV);
+      const maxD = toDeg(maxV);
+      const distMin = Math.min(Math.abs(azExact - minD), 360 - Math.abs(azExact - minD));
+      const distMax = Math.min(Math.abs(azExact - maxD), 360 - Math.abs(azExact - maxD));
+      theta = distMin <= distMax ? minD : maxD;
+    } else if (typeof value === 'number') {
+      theta = toDeg(value);
+    }
+
+    const residualDeg = Math.min(Math.abs(azExact - theta), 360 - Math.abs(azExact - theta));
+    const enterExit = boundaryType === 'start' ? 'entered' : 'exited';
+
+    return {
+      isWrapBoundary: false,
+      boundaryCategory: 'threshold_crossing',
+      thresholdDeg: theta,
+      actualValueDeg: azExact,
+      residualDeg,
+      toleranceDeg: SOLVER_TOLERANCE_DEG,
+      reason: `Solar azimuth ${enterExit} matching condition (${azExact.toFixed(2)}°) with numerical residual ${residualDeg.toExponential(2)}°.`,
+      conditionDescription: `solar.azimuth ${operator} ${theta.toFixed(2)}°`,
+    };
   }
 
   let inMatch = false;
@@ -495,19 +570,19 @@ function solveAzimuthCondition(
       const exactStart = bisectAzimuthCrossing(prevInstant.epochNanoseconds, curInstant.epochNanoseconds, true);
       matchStart = exactStart;
       if (boundaryRecordMap && exactStart.isAfter(window.start)) {
-        const c = computeSolarCoordinates(exactStart, place);
-        const az = c.azimuthDeg ?? 0;
-        const target = typeof value === 'number' ? toDeg(value) : 0;
+        const info = classifyAzimuthBoundary(exactStart, 'start');
         boundaryRecordMap.set(`start:${exactStart.epochNanoseconds}`, {
           instant: exactStart,
           boundaryType: 'start',
           property: 'azimuth',
-          thresholdDeg: target,
-          residualDeg: Math.abs(az - target),
-          toleranceDeg: SOLVER_TOLERANCE_DEG,
-          actualValueDeg: az,
-          reason: `Solar azimuth entered matching condition (${az.toFixed(2)}°).`,
-          conditionDescription: `solar.azimuth ${operator} ${target.toFixed(2)}°`,
+          thresholdDeg: info.thresholdDeg,
+          residualDeg: info.residualDeg,
+          toleranceDeg: info.toleranceDeg,
+          actualValueDeg: info.actualValueDeg,
+          reason: info.reason,
+          conditionDescription: info.conditionDescription,
+          isWrapBoundary: info.isWrapBoundary,
+          boundaryCategory: info.boundaryCategory,
         });
       }
     } else if (!curMatch && inMatch) {
@@ -516,19 +591,19 @@ function solveAzimuthCondition(
       if (matchStart !== null && matchStart.isBefore(exactEnd)) {
         matchingIntervals.push(new Interval(matchStart, exactEnd));
         if (boundaryRecordMap && exactEnd.isBefore(window.end)) {
-          const c = computeSolarCoordinates(exactEnd, place);
-          const az = c.azimuthDeg ?? 0;
-          const target = typeof value === 'number' ? toDeg(value) : 0;
+          const info = classifyAzimuthBoundary(exactEnd, 'end');
           boundaryRecordMap.set(`end:${exactEnd.epochNanoseconds}`, {
             instant: exactEnd,
             boundaryType: 'end',
             property: 'azimuth',
-            thresholdDeg: target,
-            residualDeg: Math.abs(az - target),
-            toleranceDeg: SOLVER_TOLERANCE_DEG,
-            actualValueDeg: az,
-            reason: `Solar azimuth exited matching condition (${az.toFixed(2)}°).`,
-            conditionDescription: `solar.azimuth ${operator} ${target.toFixed(2)}°`,
+            thresholdDeg: info.thresholdDeg,
+            residualDeg: info.residualDeg,
+            toleranceDeg: info.toleranceDeg,
+            actualValueDeg: info.actualValueDeg,
+            reason: info.reason,
+            conditionDescription: info.conditionDescription,
+            isWrapBoundary: info.isWrapBoundary,
+            boundaryCategory: info.boundaryCategory,
           });
         }
       }

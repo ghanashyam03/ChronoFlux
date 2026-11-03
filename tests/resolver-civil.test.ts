@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ChronoFlux, Conditions, Instant, Interval, Place } from '../src/index.js';
+import { ChronoFlux, Conditions, Instant, Interval, Place, TimeZoneLookupProvider } from '../src/index.js';
 
 describe('Phase 3B — Discrete Civil Condition Solver', () => {
   const newYork = new Place({
@@ -364,6 +364,183 @@ describe('Phase 3B — Discrete Civil Condition Solver', () => {
       const dstInterval = dstOn.intervals.intervals[0]!;
       expect(dstInterval.start.toISOString()).toBe('2026-03-08T07:00:00.000Z');
       expect(dstInterval.end.toISOString()).toBe('2026-03-09T00:00:00.000Z');
+    });
+
+    it('enforces timezone contract: rejects Place without timeZoneId when civil condition is evaluated without provider', () => {
+      const placeNoTz = new Place({
+        latitude: 40.7128,
+        longitude: -74.006,
+      });
+      const window = new Interval(
+        Instant.fromJSON('2026-06-21T00:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T00:00:00.000Z')
+      );
+      expect(() =>
+        ChronoFlux.resolve({
+          place: placeNoTz,
+          within: window,
+          where: Conditions.civil.hour.between(9, 17),
+        })
+      ).toThrow(
+        new TypeError(
+          'Civil condition resolution requires an explicit timeZoneId on Place or a registered geographic timezone lookup provider'
+        )
+      );
+    });
+
+    it('resolves civil condition on Place without timeZoneId when registered geographic provider supplies it', () => {
+      const placeNoTz = new Place({
+        latitude: 40.7128,
+        longitude: -74.006,
+      });
+      const window = new Interval(
+        Instant.fromJSON('2026-06-21T04:00:00.000Z'),
+        Instant.fromJSON('2026-06-22T04:00:00.000Z')
+      );
+
+      const mockProvider: TimeZoneLookupProvider = {
+        lookup(lat: number, lon: number): string {
+          if (Math.abs(lat - 40.7128) < 1 && Math.abs(lon - (-74.006)) < 1) {
+            return 'America/New_York';
+          }
+          return 'UTC';
+        },
+      };
+
+      try {
+        ChronoFlux.civil.registerTimeZoneLookupProvider(mockProvider);
+        const result = ChronoFlux.resolve({
+          place: placeNoTz,
+          within: window,
+          where: Conditions.civil.hour.between(9, 17),
+        });
+        expect(result.intervals.intervals.length).toBe(1);
+        expect(result.intervals.intervals[0]!.start.toISOString()).toBe('2026-06-21T13:00:00.000Z');
+        expect(result.intervals.intervals[0]!.end.toISOString()).toBe('2026-06-21T21:00:00.000Z');
+      } finally {
+        ChronoFlux.civil.registerTimeZoneLookupProvider(null);
+      }
+    });
+
+    describe('DST Fall-Back Repeated-Hour Correctness (Nov 1, 2026 in America/New_York)', () => {
+      // On Nov 1, 2026 in America/New_York:
+      // Clocks fall back at 02:00 EDT (06:00 UTC) to 01:00 EST (UTC-5).
+      // Hour 01:00 occurs twice:
+      // - 1st occurrence (EDT, UTC-4): 05:00 UTC to 06:00 UTC (isDaylightSaving = true)
+      // - 2nd occurrence (EST, UTC-5): 06:00 UTC to 07:00 UTC (isDaylightSaving = false)
+      const repeatedHourWindow = new Interval(
+        Instant.fromJSON('2026-11-01T04:00:00.000Z'), // 00:00 EDT
+        Instant.fromJSON('2026-11-01T08:00:00.000Z')  // 03:00 EST
+      );
+
+      it('synthesizes both occurrences of hour == 1 into a canonical 2-hour interval', () => {
+        const result = ChronoFlux.resolve({
+          place: newYork,
+          within: repeatedHourWindow,
+          where: Conditions.civil.hour.eq(1),
+        });
+
+        // The two consecutive 1-hour occurrences [05:00Z, 06:00Z) and [06:00Z, 07:00Z)
+        // merge into a single canonical 2-hour interval [05:00Z, 07:00Z)
+        expect(result.intervals.intervals.length).toBe(1);
+        const interval = result.intervals.intervals[0]!;
+        expect(interval.start.toISOString()).toBe('2026-11-01T05:00:00.000Z');
+        expect(interval.end.toISOString()).toBe('2026-11-01T07:00:00.000Z');
+        expect(interval.duration.totalHours).toBe(2);
+      });
+
+      it('synthesizes both occurrences of minute == 15 as distinct disjoint intervals', () => {
+        // Narrow window covering just the repeated hour (05:00Z to 07:00Z)
+        const twoHourWindow = new Interval(
+          Instant.fromJSON('2026-11-01T05:00:00.000Z'),
+          Instant.fromJSON('2026-11-01T07:00:00.000Z')
+        );
+
+        const result = ChronoFlux.resolve({
+          place: newYork,
+          within: twoHourWindow,
+          where: Conditions.civil.minute.eq(15),
+        });
+
+        // 01:15 occurs twice:
+        // 1st: 01:15 EDT = 05:15 UTC to 05:16 UTC
+        // 2nd: 01:15 EST = 06:15 UTC to 06:16 UTC
+        expect(result.intervals.intervals.length).toBe(2);
+        expect(result.intervals.intervals[0]!.start.toISOString()).toBe('2026-11-01T05:15:00.000Z');
+        expect(result.intervals.intervals[0]!.end.toISOString()).toBe('2026-11-01T05:16:00.000Z');
+        expect(result.intervals.intervals[1]!.start.toISOString()).toBe('2026-11-01T06:15:00.000Z');
+        expect(result.intervals.intervals[1]!.end.toISOString()).toBe('2026-11-01T06:16:00.000Z');
+      });
+
+      it('synthesizes both occurrences of second == 30 across the repeated hour', () => {
+        // Window from 05:15Z to 06:16Z (duration ~1 hour, well within 2-day limit for second queries)
+        const subWindow = new Interval(
+          Instant.fromJSON('2026-11-01T05:15:00.000Z'),
+          Instant.fromJSON('2026-11-01T06:16:00.000Z')
+        );
+
+        const result = ChronoFlux.resolve({
+          place: newYork,
+          within: subWindow,
+          where: Conditions.civil.second.eq(30),
+        });
+
+        // Synthesizes 01:15:30 EDT and 01:15:30 EST
+        const matches = result.intervals.intervals.filter(
+          (iv) =>
+            iv.start.toISOString() === '2026-11-01T05:15:30.000Z' ||
+            iv.start.toISOString() === '2026-11-01T06:15:30.000Z'
+        );
+        expect(matches.length).toBe(2);
+        expect(matches[0]!.duration.totalSeconds).toBe(1);
+        expect(matches[1]!.duration.totalSeconds).toBe(1);
+      });
+
+      it('disambiguates repeated-hour queries via AND/OR boolean composition', () => {
+        const twoHourWindow = new Interval(
+          Instant.fromJSON('2026-11-01T05:00:00.000Z'),
+          Instant.fromJSON('2026-11-01T07:00:00.000Z')
+        );
+
+        // 1. minute == 15 AND isDaylightSaving == true -> ONLY EDT occurrence
+        const edtOnly = ChronoFlux.resolve({
+          place: newYork,
+          within: twoHourWindow,
+          where: Conditions.and(
+            Conditions.civil.minute.eq(15),
+            Conditions.civil.isDaylightSaving.eq(true)
+          ),
+        });
+        expect(edtOnly.intervals.intervals.length).toBe(1);
+        expect(edtOnly.intervals.intervals[0]!.start.toISOString()).toBe('2026-11-01T05:15:00.000Z');
+
+        // 2. minute == 15 AND isDaylightSaving == false -> ONLY EST occurrence
+        const estOnly = ChronoFlux.resolve({
+          place: newYork,
+          within: twoHourWindow,
+          where: Conditions.and(
+            Conditions.civil.minute.eq(15),
+            Conditions.civil.isDaylightSaving.eq(false)
+          ),
+        });
+        expect(estOnly.intervals.intervals.length).toBe(1);
+        expect(estOnly.intervals.intervals[0]!.start.toISOString()).toBe('2026-11-01T06:15:00.000Z');
+
+        // 3. minute == 15 OR minute == 30 -> 4 occurrences (2 for EDT, 2 for EST)
+        const orQuery = ChronoFlux.resolve({
+          place: newYork,
+          within: twoHourWindow,
+          where: Conditions.or(
+            Conditions.civil.minute.eq(15),
+            Conditions.civil.minute.eq(30)
+          ),
+        });
+        expect(orQuery.intervals.intervals.length).toBe(4);
+        expect(orQuery.intervals.intervals[0]!.start.toISOString()).toBe('2026-11-01T05:15:00.000Z');
+        expect(orQuery.intervals.intervals[1]!.start.toISOString()).toBe('2026-11-01T05:30:00.000Z');
+        expect(orQuery.intervals.intervals[2]!.start.toISOString()).toBe('2026-11-01T06:15:00.000Z');
+        expect(orQuery.intervals.intervals[3]!.start.toISOString()).toBe('2026-11-01T06:30:00.000Z');
+      });
     });
   });
 });

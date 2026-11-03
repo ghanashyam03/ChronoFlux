@@ -193,5 +193,116 @@ describe('Phase 3A — Condition AST and Fluent Builder', () => {
       expect(() => Conditions.solar.elevation.between(NaN, 10)).toThrow(TypeError);
       expect(() => Conditions.civil.hour.in([])).toThrow(TypeError);
     });
+
+    it('rejects non-finite numbers (NaN, Infinity, -Infinity) with TypeError', () => {
+      expect(() => Conditions.civil.hour.eq(NaN)).toThrow(TypeError);
+      expect(() => Conditions.civil.hour.eq(Infinity)).toThrow(TypeError);
+      expect(() => Conditions.civil.hour.eq(-Infinity)).toThrow(TypeError);
+      expect(() => Conditions.solar.elevation.gte(Infinity)).toThrow(TypeError);
+      expect(() => Conditions.solar.elevation.gte(-Infinity)).toThrow(TypeError);
+      expect(() => Conditions.solar.elevation.between(10, NaN)).toThrow(TypeError);
+      expect(() =>
+        validateConditionAST({
+          kind: 'comparison',
+          domain: 'solar',
+          property: 'elevation',
+          operator: 'gte',
+          value: NaN,
+          unit: 'deg',
+        })
+      ).toThrow(TypeError);
+    });
+
+    it('rejects out-of-range civil values with RangeError', () => {
+      // hour in [0, 24]
+      expect(() => Conditions.civil.hour.eq(-1)).toThrow(RangeError);
+      expect(() => Conditions.civil.hour.eq(25)).toThrow(RangeError);
+      expect(() => Conditions.civil.hour.between(-1, 10)).toThrow(RangeError);
+      expect(() => Conditions.civil.hour.between(9, 25)).toThrow(RangeError);
+
+      // minute in [0, 60]
+      expect(() => Conditions.civil.minute.eq(-1)).toThrow(RangeError);
+      expect(() => Conditions.civil.minute.eq(61)).toThrow(RangeError);
+      expect(() => Conditions.civil.minute.between(0, 61)).toThrow(RangeError);
+
+      // second in [0, 60]
+      expect(() => Conditions.civil.second.eq(-1)).toThrow(RangeError);
+      expect(() => Conditions.civil.second.eq(61)).toThrow(RangeError);
+      expect(() => Conditions.civil.second.between(0, 61)).toThrow(RangeError);
+
+      // day in [1, 31]
+      expect(() => Conditions.civil.day.eq(0)).toThrow(RangeError);
+      expect(() => Conditions.civil.day.eq(32)).toThrow(RangeError);
+
+      // month in [1, 12]
+      expect(() => Conditions.civil.month.eq(0)).toThrow(RangeError);
+      expect(() => Conditions.civil.month.eq(13)).toThrow(RangeError);
+
+      // dayOfWeek in [1, 7]
+      expect(() => Conditions.civil.dayOfWeek.eq(0)).toThrow(RangeError);
+      expect(() => Conditions.civil.dayOfWeek.eq(8)).toThrow(RangeError);
+    });
+
+    it('validates property unit compatibility and rejects invalid units with TypeError', () => {
+      // Incompatible units
+      expect(() => Conditions.civil.hour.between(9, 17, 'minutes' as any)).toThrow(TypeError);
+      expect(() => Conditions.civil.minute.eq(15, 'hours' as any)).toThrow(TypeError);
+      expect(() => Conditions.civil.second.eq(30, 'deg' as any)).toThrow(TypeError);
+      expect(() => Conditions.civil.dayOfWeek.eq(1, 'hours' as any)).toThrow(TypeError);
+      expect(() => Conditions.solar.elevation.gte(10, 'hours' as any)).toThrow(TypeError);
+      expect(() => Conditions.solar.azimuth.gte(180, 'seconds' as any)).toThrow(TypeError);
+
+      // Compatible units
+      expect(Conditions.civil.hour.between(9, 17, 'hours')).toBeDefined();
+      expect(Conditions.civil.minute.eq(15, 'minutes')).toBeDefined();
+      expect(Conditions.civil.second.eq(30, 'seconds')).toBeDefined();
+      expect(Conditions.solar.elevation.gte(10, 'deg')).toBeDefined();
+      expect(Conditions.solar.elevation.gte(0.1745, 'rad')).toBeDefined();
+    });
+
+    it('enforces strict property-operator compatibility matrix', () => {
+      // Categorical / boolean properties only accept eq, neq, in
+      expect(() =>
+        validateConditionAST({
+          kind: 'comparison',
+          domain: 'solar',
+          property: 'phase',
+          operator: 'gt',
+          value: 'day',
+        })
+      ).toThrow(TypeError);
+
+      expect(() =>
+        validateConditionAST({
+          kind: 'comparison',
+          domain: 'solar',
+          property: 'isDirectSunlight',
+          operator: 'between',
+          value: [0, 1],
+        })
+      ).toThrow(TypeError);
+
+      expect(() =>
+        validateConditionAST({
+          kind: 'comparison',
+          domain: 'civil',
+          property: 'isDaylightSaving',
+          operator: 'lt',
+          value: true,
+        })
+      ).toThrow(TypeError);
+
+      // Numeric properties cannot use non-array value for between
+      expect(() =>
+        validateConditionAST({
+          kind: 'comparison',
+          domain: 'solar',
+          property: 'elevation',
+          operator: 'between',
+          value: 10 as any,
+          unit: 'deg',
+        })
+      ).toThrow(TypeError);
+    });
   });
 });
