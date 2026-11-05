@@ -8,7 +8,7 @@ This file documents the Antigravity tooling configuration, slash command protoco
 
 - **Project Name**: TIME 2.0 (`time-2.0`)
 - **Workspace Path**: `c:\Users\ghana\Documents\antigravity\noble-pythagoras`
-- **GitHub Repository**: `https://github.com/ghanashyam03/ChronoFlux.git`
+- **GitHub Repository**: `https://github.com/ghanashyam03/TIME-2.0.git`
 - **Primary Branch**: `main`
 - **Core Technology Stack**: TypeScript, Node.js (ESM), React, Three.js, Tailwind CSS, Vite, Vitest, fast-check (property-based testing)
 - **Artifact Directory**: `C:\Users\ghana\.gemini\antigravity\brain\1664b0a0-4c81-4618-b7c3-8594bb1307d1`

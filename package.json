@@ -21,12 +21,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/ghanashyam03/ChronoFlux.git"
+    "url": "https://github.com/ghanashyam03/TIME-2.0.git"
   },
   "bugs": {
-    "url": "https://github.com/ghanashyam03/ChronoFlux/issues"
+    "url": "https://github.com/ghanashyam03/TIME-2.0/issues"
   },
-  "homepage": "https://github.com/ghanashyam03/ChronoFlux#readme",
+  "homepage": "https://github.com/ghanashyam03/TIME-2.0#readme",
   "scripts": {
     "build": "tsc",
     "prepack": "npm run build",

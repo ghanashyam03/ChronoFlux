@@ -1,6 +1,6 @@
 # TIME 2.0 (`time-2.0`)
 
-[![CI](https://github.com/ghanashyam03/ChronoFlux/actions/workflows/ci.yml/badge.svg)](https://github.com/ghanashyam03/ChronoFlux/actions/workflows/ci.yml)
+[![CI](https://github.com/ghanashyam03/TIME-2.0/actions/workflows/ci.yml/badge.svg)](https://github.com/ghanashyam03/TIME-2.0/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/badge/npm-v0.1.0-blue.svg)](https://www.npmjs.com/package/time-2.0)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -606,4 +606,4 @@ npm run build:visualizer
 
 ## License
 
-MIT © [TIME 2.0 Contributors](https://github.com/ghanashyam03/ChronoFlux)
+MIT © [TIME 2.0 Contributors](https://github.com/ghanashyam03/TIME-2.0)

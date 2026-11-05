@@ -255,9 +255,9 @@ describe('Phase 4 — Developer SDK, Packaging, and Semantic Correctness', () =>
       expect(pkg.files).toEqual(['dist', 'README.md', 'LICENSE']);
       expect(pkg.engines).toBeDefined();
       expect(pkg.engines.node).toBe('>=18.0.0');
-      expect(pkg.repository.url).toBe('https://github.com/ghanashyam03/ChronoFlux.git');
-      expect(pkg.bugs.url).toBe('https://github.com/ghanashyam03/ChronoFlux/issues');
-      expect(pkg.homepage).toBe('https://github.com/ghanashyam03/ChronoFlux#readme');
+      expect(pkg.repository.url).toBe('https://github.com/ghanashyam03/TIME-2.0.git');
+      expect(pkg.bugs.url).toBe('https://github.com/ghanashyam03/TIME-2.0/issues');
+      expect(pkg.homepage).toBe('https://github.com/ghanashyam03/TIME-2.0#readme');
       expect(pkg.scripts.prepack).toBe('npm run build');
     });
 

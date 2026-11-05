@@ -90,7 +90,7 @@ All primitives are located in `src/core/primitives/`:
    - Use `fast-check` alongside standard Vitest unit tests to stress-test boundary conditions, inverse properties, and algebraic laws (associativity, distributivity, De Morgan's laws).
 4. **Git Discipline**:
    - Make atomic, descriptive commits following Conventional Commits (`feat(core): ...`, `test(core): ...`, `docs: ...`, `fix(core): ...`).
-   - Remote origin: `https://github.com/ghanashyam03/ChronoFlux.git`.
+   - Remote origin: `https://github.com/ghanashyam03/TIME-2.0.git`.
    - Ensure `npm test`, `npm run test:coverage`, and `npm run build` pass with zero warnings before pushing.
 
 ---
