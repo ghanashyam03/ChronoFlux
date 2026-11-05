@@ -514,11 +514,77 @@ describe('Civil Calendar & IANA Time Zone Model', () => {
       });
       expect(resolvedYear0.toISOString()).toBe('0000-01-01T00:00:00.000Z');
 
-      // Fallback pure Intl mode without Temporal
+      // Leap year in 0 CE (proleptic Gregorian leap year)
+      const resolvedYear0Leap = ChronoFlux.civil.resolve({
+        year: 0,
+        month: 2,
+        day: 29,
+        timeZoneId: 'UTC',
+      });
+      expect(resolvedYear0Leap.toISOString()).toBe('0000-02-29T00:00:00.000Z');
+
+      // Leap year in 4 CE
+      const resolvedYear4Leap = ChronoFlux.civil.resolve({
+        year: 4,
+        month: 2,
+        day: 29,
+        timeZoneId: 'UTC',
+      });
+      expect(resolvedYear4Leap.toISOString()).toBe('0004-02-29T00:00:00.000Z');
+
+      // Year 99 and 100 boundaries
+      const resolvedYear99 = ChronoFlux.civil.resolve({
+        year: 99,
+        month: 12,
+        day: 31,
+        timeZoneId: 'UTC',
+      });
+      expect(resolvedYear99.toISOString()).toBe('0099-12-31T00:00:00.000Z');
+
+      const resolvedYear100 = ChronoFlux.civil.resolve({
+        year: 100,
+        month: 1,
+        day: 1,
+        timeZoneId: 'UTC',
+      });
+      expect(resolvedYear100.toISOString()).toBe('0100-01-01T00:00:00.000Z');
+
+      // Civil state evaluation in Year 0
+      const stateYear0 = ChronoFlux.civil.evaluate(resolvedYear0, 'UTC');
+      expect(stateYear0.year).toBe(0);
+      expect(stateYear0.month).toBe(1);
+      expect(stateYear0.day).toBe(1);
+      expect(stateYear0.utcOffsetMinutes).toBe(0);
+
+      // Fallback pure Intl mode without Temporal (verifies Node 18 / 22 environments)
       const globalObj = globalThis as Record<string, unknown>;
       const originalTemporal = globalObj['Temporal'];
       try {
         delete globalObj['Temporal'];
+
+        const fallbackYear0 = ChronoFlux.civil.resolve({
+          year: 0,
+          month: 1,
+          day: 1,
+          timeZoneId: 'UTC',
+        });
+        expect(fallbackYear0.toISOString()).toBe('0000-01-01T00:00:00.000Z');
+
+        const fallbackYear0Leap = ChronoFlux.civil.resolve({
+          year: 0,
+          month: 2,
+          day: 29,
+          timeZoneId: 'UTC',
+        });
+        expect(fallbackYear0Leap.toISOString()).toBe('0000-02-29T00:00:00.000Z');
+
+        const fallbackYear4Leap = ChronoFlux.civil.resolve({
+          year: 4,
+          month: 2,
+          day: 29,
+          timeZoneId: 'UTC',
+        });
+        expect(fallbackYear4Leap.toISOString()).toBe('0004-02-29T00:00:00.000Z');
 
         const fallbackYear26 = ChronoFlux.civil.resolve({
           year: 26,
@@ -528,6 +594,20 @@ describe('Civil Calendar & IANA Time Zone Model', () => {
           timeZoneId: 'UTC',
         });
         expect(fallbackYear26.toISOString()).toBe('0026-06-15T12:00:00.000Z');
+
+        const fallbackYear99 = ChronoFlux.civil.resolve({
+          year: 99,
+          month: 12,
+          day: 31,
+          timeZoneId: 'UTC',
+        });
+        expect(fallbackYear99.toISOString()).toBe('0099-12-31T00:00:00.000Z');
+
+        const fallbackStateYear0 = ChronoFlux.civil.evaluate(fallbackYear0, 'UTC');
+        expect(fallbackStateYear0.year).toBe(0);
+        expect(fallbackStateYear0.month).toBe(1);
+        expect(fallbackStateYear0.day).toBe(1);
+        expect(fallbackStateYear0.utcOffsetMinutes).toBe(0);
       } finally {
         globalObj['Temporal'] = originalTemporal;
       }

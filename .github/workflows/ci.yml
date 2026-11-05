@@ -38,8 +38,18 @@ jobs:
       - name: Collect test coverage
         run: npm run test:coverage
 
+      - name: Typecheck visualizer
+        run: npm run typecheck:visualizer
+
+      - name: Build visualizer
+        run: npm run build:visualizer
+
       - name: Pack package archive
         run: npm pack
+
+      - name: Verify package archive contents (isolation from visualizer)
+        run: |
+          tar -tf time-2.0-*.tgz | grep -E "^package/src/visualizer|^package/dist-visualizer" && exit 1 || echo "Package tarball contains zero visualizer files."
 
       - name: Verify external consumer
         run: |

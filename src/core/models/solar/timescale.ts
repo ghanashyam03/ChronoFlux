@@ -3,7 +3,7 @@
  * Astronomical Time-Scale Specifications and Conversions.
  *
  * Defines the relationship between:
- * 1. ChronoFlux Instant: POSIX / Unix epoch elapsed SI nanoseconds since 1970-01-01T00:00:00Z.
+ * 1. TIME 2.0 Instant: POSIX / Unix epoch elapsed SI nanoseconds since 1970-01-01T00:00:00Z.
  *    Assumes exactly 86,400 SI seconds per civil calendar day (leap-second free).
  * 2. UTC (Coordinated Universal Time): Civil broadcast time scale based on SI seconds,
  *    periodically synchronized to Earth's rotation via leap seconds (|UTC - UT1| < 0.9s).

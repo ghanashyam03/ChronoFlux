@@ -1,6 +1,6 @@
 /**
  * @file index.ts
- * Public entrypoint for the ChronoFlux Temporal Conditions and Resolver module.
+ * Public entrypoint for the TIME 2.0 Temporal Conditions and Resolver module.
  */
 
 import { Duration } from '../primitives/duration.js';

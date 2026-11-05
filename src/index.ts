@@ -1,6 +1,6 @@
 /**
  * @file index.ts
- * Main entry point for @chronoflux/core.
+ * Main entry point for time-2.0 (TIME 2.0).
  */
 
 import {
@@ -100,11 +100,11 @@ export type {
 } from './core/index.js';
 
 /**
- * ChronoFlux public developer facade.
+ * TIME 2.0 public developer facade.
  * Provides concise and ergonomic factory methods for temporal foundations,
  * astronomical solar calculations, and civil time evaluation.
  */
-export const ChronoFlux = Object.freeze({
+export const Time = Object.freeze({
   /**
    * Captures the current wall-clock instant.
    */
@@ -351,4 +351,10 @@ export const ChronoFlux = Object.freeze({
   },
 });
 
-export default ChronoFlux;
+/**
+ * Backward-compatibility alias for the TIME 2.0 facade.
+ * @deprecated Use `Time` instead of `ChronoFlux`.
+ */
+export const ChronoFlux = Time;
+
+export default Time;

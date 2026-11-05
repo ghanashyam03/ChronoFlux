@@ -8,6 +8,7 @@ import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
+  Time,
   ChronoFlux,
   Conditions,
   Instant,
@@ -248,7 +249,7 @@ describe('Phase 4 — Developer SDK, Packaging, and Semantic Correctness', () =>
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 
     it('declares exact required package.json metadata and files whitelist', () => {
-      expect(pkg.name).toBe('@chronoflux/core');
+      expect(pkg.name).toBe('time-2.0');
       expect(pkg.version).toBe('0.1.0');
       expect(pkg.type).toBe('module');
       expect(pkg.files).toEqual(['dist', 'README.md', 'LICENSE']);
@@ -268,30 +269,30 @@ describe('Phase 4 — Developer SDK, Packaging, and Semantic Correctness', () =>
       expect(fs.existsSync(licensePath)).toBe(true);
       const licenseContent = fs.readFileSync(licensePath, 'utf-8');
       expect(licenseContent).toContain('MIT License');
-      expect(licenseContent).toContain('ChronoFlux Contributors');
       expect(pkg.license).toBe('MIT');
     });
 
-    it('exposes all public types and frozen ChronoFlux developer facade', () => {
-      expect(ChronoFlux).toBeDefined();
-      expect(Object.isFrozen(ChronoFlux)).toBe(true);
-      expect(typeof ChronoFlux.now).toBe('function');
-      expect(typeof ChronoFlux.instant).toBe('function');
-      expect(typeof ChronoFlux.duration.hours).toBe('function');
-      expect(typeof ChronoFlux.place).toBe('function');
-      expect(typeof ChronoFlux.interval).toBe('function');
-      expect(typeof ChronoFlux.intervalSet.from).toBe('function');
-      expect(typeof ChronoFlux.solar.evaluate).toBe('function');
-      expect(typeof ChronoFlux.civil.resolve).toBe('function');
-      expect(typeof ChronoFlux.resolve).toBe('function');
-      expect(ChronoFlux.conditions).toBeDefined();
+    it('exposes all public types and frozen Time developer facade (plus ChronoFlux backward alias)', () => {
+      expect(Time).toBeDefined();
+      expect(Object.isFrozen(Time)).toBe(true);
+      expect(ChronoFlux).toBe(Time);
+      expect(typeof Time.now).toBe('function');
+      expect(typeof Time.instant).toBe('function');
+      expect(typeof Time.duration.hours).toBe('function');
+      expect(typeof Time.place).toBe('function');
+      expect(typeof Time.interval).toBe('function');
+      expect(typeof Time.intervalSet.from).toBe('function');
+      expect(typeof Time.solar.evaluate).toBe('function');
+      expect(typeof Time.civil.resolve).toBe('function');
+      expect(typeof Time.resolve).toBe('function');
+      expect(Time.conditions).toBeDefined();
 
       // Factory ergonomics verification
       const original = Instant.fromJSON('2026-06-21T12:00:00.000Z');
-      expect(ChronoFlux.instant(original)).toBe(original);
+      expect(Time.instant(original)).toBe(original);
 
       const temporalObj = { epochNanoseconds: original.epochNanoseconds };
-      const fromTemporal = ChronoFlux.instant(temporalObj);
+      const fromTemporal = Time.instant(temporalObj);
       expect(fromTemporal.equals(original)).toBe(true);
 
       // Compile-time type check verification for all public root types
@@ -340,9 +341,9 @@ describe('Phase 4 — Developer SDK, Packaging, and Semantic Correctness', () =>
       expect(Array.isArray(packResult)).toBe(true);
       expect(packResult.length).toBeGreaterThan(0);
       const tarballInfo = packResult[0];
-      expect(tarballInfo.name).toBe('@chronoflux/core');
+      expect(tarballInfo.name).toBe('time-2.0');
       expect(tarballInfo.version).toBe('0.1.0');
-      expect(tarballInfo.filename).toBe('chronoflux-core-0.1.0.tgz');
+      expect(tarballInfo.filename).toBe('time-2.0-0.1.0.tgz');
       expect(tarballInfo.files.length).toBeGreaterThan(0);
 
       // Verify that every single file in the tarball is in dist/, or is README.md, LICENSE, package.json

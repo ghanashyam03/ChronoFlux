@@ -1,6 +1,6 @@
 # Installation & Setup
 
-`@chronoflux/core` is a zero-dependency, high-precision temporal foundation and condition-state engine for Node.js and modern JavaScript/TypeScript runtimes.
+`time-2.0` (TIME 2.0) is a zero-dependency, high-precision temporal foundation and condition-state engine for Node.js and modern JavaScript/TypeScript runtimes.
 
 ## Engine Requirements
 
@@ -14,28 +14,29 @@ Install via your preferred package manager:
 
 ```bash
 # npm
-npm install @chronoflux/core
+npm install time-2.0
 
 # pnpm
-pnpm add @chronoflux/core
+pnpm add time-2.0
 
 # yarn
-yarn add @chronoflux/core
+yarn add time-2.0
 ```
 
 ## Zero Production Dependencies
 
-`@chronoflux/core` has **zero external runtime dependencies**. All mathematical ephemeris calculations, coordinate transformations, bracketed Brent-Dekker root solvers, nanosecond arithmetic primitives, and IANA timezone evaluators are implemented natively from first principles without pulling in transitive packages.
+`time-2.0` has **zero external runtime dependencies**. All mathematical ephemeris calculations, coordinate transformations, bracketed Brent-Dekker root solvers, nanosecond arithmetic primitives, and IANA timezone evaluators are implemented natively from first principles without pulling in transitive packages.
 
 ## Package Exports & Import Styles
 
-The package exports both named exports and a frozen default facade object `ChronoFlux`.
+The package exports both named exports and a frozen default facade object `Time` (with backwards-compatible `ChronoFlux` alias).
 
 ### Named Imports (Recommended for Tree-Shaking)
 
 ```typescript
 import {
-  ChronoFlux,
+  Time,
+  ChronoFlux, // Backwards-compatibility alias
   Instant,
   Duration,
   Place,
@@ -43,36 +44,28 @@ import {
   IntervalSet,
   Conditions,
   resolve,
-} from '@chronoflux/core';
+} from 'time-2.0';
 import type {
   ResolutionResult,
   ResolutionReport,
   SolarState,
-  CivilState,
-} from '@chronoflux/core';
+  CivilDateTime,
+} from 'time-2.0';
 ```
 
-### Facade Default Import
+### Facade Import
 
 ```typescript
-import ChronoFlux from '@chronoflux/core';
+import { Time } from 'time-2.0';
 
-const now = ChronoFlux.now();
-const place = ChronoFlux.place({ latitude: 40.7128, longitude: -74.006, timeZoneId: 'America/New_York' });
+const instant = Time.now();
+const place = Time.place({ latitude: 35.6762, longitude: 139.6503, timeZoneId: 'Asia/Tokyo' });
 ```
 
-## TypeScript Configuration
+### Backwards Compatibility
 
-Ensure your `tsconfig.json` targets modern ECMAScript with Node module resolution:
+```typescript
+import { ChronoFlux } from 'time-2.0';
 
-```json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "strict": true,
-    "esModuleInterop": true
-  }
-}
+console.assert(ChronoFlux === Time); // true
 ```

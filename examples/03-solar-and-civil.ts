@@ -9,10 +9,10 @@
  * - Inspecting multi-model boundary explanations in ResolutionReport
  */
 
-import { ChronoFlux, Conditions, Instant, Duration } from '../src/index.js';
+import { Time, Conditions, Instant, Duration } from '../src/index.js';
 
 // 1. Observer: Sydney, Australia
-const sydney = ChronoFlux.place({
+const sydney = Time.place({
   latitude: -33.8688,
   longitude: 151.2093,
   timeZoneId: 'Australia/Sydney',
@@ -20,7 +20,7 @@ const sydney = ChronoFlux.place({
 
 // 2. Search window: 5 days in Southern winter (July 2026)
 const start = Instant.fromJSON('2026-07-06T00:00:00.000Z');
-const window = ChronoFlux.interval(start, start.add(Duration.fromDays(5)));
+const window = Time.interval(start, start.add(Duration.fromDays(5)));
 
 console.log('=== Example 3: Composing Solar & Civil Conditions ===');
 console.log(`Observer: Sydney, Australia (${sydney.latitude}°, ${sydney.longitude}°)`);
@@ -37,7 +37,7 @@ const query = Conditions.and(
 );
 
 // 4. Resolve candidate intervals
-const result = ChronoFlux.resolve({
+const result = Time.resolve({
   place: sydney,
   within: window,
   where: query,
@@ -48,8 +48,8 @@ const result = ChronoFlux.resolve({
 console.log(`Resolved ${result.intervals.intervals.length} matching operational daylight windows:\n`);
 
 result.intervals.intervals.forEach((iv, idx) => {
-  const localStart = ChronoFlux.civil.evaluate(iv.start, sydney);
-  const localEnd = ChronoFlux.civil.evaluate(iv.end, sydney);
+  const localStart = Time.civil.evaluate(iv.start, sydney);
+  const localEnd = Time.civil.evaluate(iv.end, sydney);
   const startStr = `${localStart.hour.toString().padStart(2, '0')}:${localStart.minute.toString().padStart(2, '0')}`;
   const endStr = `${localEnd.hour.toString().padStart(2, '0')}:${localEnd.minute.toString().padStart(2, '0')}`;
 

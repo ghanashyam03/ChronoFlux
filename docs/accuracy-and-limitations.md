@@ -1,12 +1,12 @@
 # Accuracy & Limitations
 
-This document outlines the numerical accuracy, physical assumptions, empirical error bounds, and validity limits of `@chronoflux/core`.
+This document outlines the numerical accuracy, physical assumptions, empirical error bounds, and validity limits of `time-2.0` (TIME 2.0).
 
 ---
 
 ## 1. Ephemeris Accuracy & Validity Range
 
-The solar ephemeris in ChronoFlux is derived from truncated analytical planetary series (Jean Meeus / NOAA formulation):
+The solar ephemeris in TIME 2.0 is derived from truncated analytical planetary series (Jean Meeus / NOAA formulation):
 
 | Parameter | Nominal Bounds | Notes |
 | :--- | :--- | :--- |

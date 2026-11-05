@@ -1,6 +1,6 @@
 /**
  * @file builder.ts
- * Ergonomic fluent Condition query builder API for ChronoFlux.
+ * Ergonomic fluent Condition query builder API for TIME 2.0.
  * Produces strictly typed, runtime-frozen, serializable ConditionAST nodes.
  */
 

@@ -1,6 +1,6 @@
 /**
  * @file types.ts
- * Core types, interfaces, and mathematical constants for ChronoFlux temporal foundations.
+ * Core types, interfaces, and mathematical constants for TIME 2.0 temporal foundations.
  */
 
 /**
@@ -48,7 +48,7 @@ export interface InstantParseOptions {
    *   the existing Phase 1 test suite while strictly eliminating arbitrary/unvalidated second 60 inputs.
    * - `clamp`: Alias for `compatible`.
    * - `reject` / `strict`: Strictly rejects all second 60 timestamps with a RangeError,
-   *   strictly enforcing ChronoFlux's leap-second-free Unix epoch Instant model.
+   *   strictly enforcing TIME 2.0's leap-second-free Unix epoch Instant model.
    */
   readonly leapSecondPolicy?: LeapSecondPolicy;
 }

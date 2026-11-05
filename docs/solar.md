@@ -1,6 +1,6 @@
 # Astronomical Solar Model
 
-The ChronoFlux Solar Model implements high-precision, continuous astronomical ephemeris algorithms based on Jean Meeus's *Astronomical Algorithms* (truncated planetary series) and NOAA solar calculations.
+The TIME 2.0 Solar Model implements high-precision, continuous astronomical ephemeris algorithms based on Jean Meeus's *Astronomical Algorithms* (truncated planetary series) and NOAA solar calculations.
 
 ---
 
@@ -36,13 +36,13 @@ $$\theta_{\text{eff}} = \theta_{\text{base}} - d_{\text{dip}}$$
 When you only need current solar elevation, azimuth, and zenith without the overhead of diurnal event solving, use `evaluatePosition`:
 
 ```typescript
-import { ChronoFlux } from '@chronoflux/core';
+import { Time } from 'time-2.0';
 
-const place = ChronoFlux.place({ latitude: 51.5074, longitude: -0.1278 });
-const now = ChronoFlux.now();
+const place = Time.place({ latitude: 51.5074, longitude: -0.1278 });
+const now = Time.now();
 
 // Lightweight, pure analytical positioning (~8 µs per operation)
-const pos = ChronoFlux.solar.evaluatePosition(now, place);
+const pos = Time.solar.evaluatePosition(now, place);
 
 console.log(`Elevation: ${pos.elevationDeg.toFixed(2)}°`);
 console.log(`Azimuth:   ${pos.azimuthDeg?.toFixed(2)}°`);
@@ -53,7 +53,7 @@ console.log(`Zenith:    ${pos.zenithDeg.toFixed(2)}°`);
 
 ## 4. Diurnal Solar Events & Event Solving
 
-ChronoFlux calculates 10 distinct diurnal solar events using bracketed Brent-Dekker root finding:
+TIME 2.0 calculates 10 distinct diurnal solar events using bracketed Brent-Dekker root finding:
 - `sunrise` and `sunset` ($h_{\text{geom}} = -0.8333^\circ - d_{\text{dip}}$)
 - `solarNoon` (meridian transit / elevation maximum)
 - `solarMidnight` (nadir / elevation minimum)
@@ -62,14 +62,14 @@ ChronoFlux calculates 10 distinct diurnal solar events using bracketed Brent-Dek
 - `astronomicalDawn` and `astronomicalDusk` ($h_{\text{geom}} = -18^\circ$)
 
 ```typescript
-import { ChronoFlux } from '@chronoflux/core';
+import { Time } from 'time-2.0';
 
-const place = ChronoFlux.place({ latitude: 37.7749, longitude: -122.4194 });
+const place = Time.place({ latitude: 37.7749, longitude: -122.4194 });
 
-const nextSunrise = ChronoFlux.solar.nextEvent({
+const nextSunrise = Time.solar.nextEvent({
   event: 'sunrise',
   place,
-  after: ChronoFlux.now(),
+  after: Time.now(),
 });
 
 console.log(`Next sunrise: ${nextSunrise?.toISOString()}`);
@@ -92,14 +92,14 @@ The solar model returns `polarRegime: 'polar_day' | 'polar_night' | 'none'` inde
 
 Earth's rotational speed varies due to tidal friction and core interactions. The solar ephemeris requires uniform Terrestrial Time (TT), whereas computer clocks run on civil UTC.
 
-ChronoFlux incorporates an extensible time-scale provider:
+TIME 2.0 incorporates an extensible time-scale provider:
 $$\Delta T = \text{TT} - \text{UT1} \approx 69.2\text{ s (in 2026)}$$
 
 ```typescript
-import { ChronoFlux, getAstronomicalTimeScale } from '@chronoflux/core';
+import { Time, getAstronomicalTimeScale } from 'time-2.0';
 
-const timescale = ChronoFlux.solar.getAstronomicalTimeScale();
-const deltaT = timescale.getDeltaT(ChronoFlux.now());
+const timescale = Time.solar.getAstronomicalTimeScale();
+const deltaT = timescale.getDeltaT(Time.now());
 console.log(`Current Delta T: ${deltaT} seconds`);
 ```
-Custom high-order IERS polynomial providers can be registered via `ChronoFlux.solar.registerAstronomicalTimeScale()`.
+Custom high-order IERS polynomial providers can be registered via `Time.solar.registerAstronomicalTimeScale()`.

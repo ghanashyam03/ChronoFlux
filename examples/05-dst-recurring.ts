@@ -9,12 +9,12 @@
  * - Disambiguating specific instances via Conditions.civil.isDaylightSaving
  */
 
-import { ChronoFlux, Conditions, Instant, Duration } from '../src/index.js';
+import { Time, Conditions, Instant, Duration } from '../src/index.js';
 
 console.log('=== Example 5: DST Fall-Back Repeated-Hour Resolution ===\n');
 
 // 1. Observer: New York (America/New_York)
-const nyc = ChronoFlux.place({
+const nyc = Time.place({
   latitude: 40.7128,
   longitude: -74.006,
   timeZoneId: 'America/New_York',
@@ -24,7 +24,7 @@ const nyc = ChronoFlux.place({
 // Clocks fall back from 02:00 EDT to 01:00 EST. The day is 25 hours long!
 const transitionDayStart = Instant.fromJSON('2026-11-01T04:00:00.000Z'); // 00:00 EDT
 const transitionDayEnd = Instant.fromJSON('2026-11-02T05:00:00.000Z');   // 00:00 EST next day
-const window = ChronoFlux.interval(transitionDayStart, transitionDayEnd);
+const window = Time.interval(transitionDayStart, transitionDayEnd);
 
 console.log(`Location: New York (${nyc.timeZoneId})`);
 console.log(`Window:   ${window.start.toISOString()} → ${window.end.toISOString()}`);
@@ -36,7 +36,7 @@ console.log(`Duration: ${window.duration.totalHours} hours (25-hour fall-back da
 // - Occurrence 2: 01:00 - 02:00 EST (UTC-5) -> 06:00 - 07:00 UTC
 const hour1Query = Conditions.civil.hour.eq(1);
 
-const result = ChronoFlux.resolve({
+const result = Time.resolve({
   place: nyc,
   within: window,
   where: hour1Query,
@@ -44,15 +44,15 @@ const result = ChronoFlux.resolve({
 
 console.log(`Query "civil.hour == 1" produced ${result.intervals.intervals.length} distinct continuous intervals:`);
 result.intervals.intervals.forEach((iv, i) => {
-  const startState = ChronoFlux.civil.evaluate(iv.start, nyc);
-  const endState = ChronoFlux.civil.evaluate(iv.end, nyc);
+  const startState = Time.civil.evaluate(iv.start, nyc);
+  const endState = Time.civil.evaluate(iv.end, nyc);
   console.log(`  [Instance ${i + 1}] UTC: ${iv.start.toISOString()} → ${iv.end.toISOString()} (${iv.duration.totalHours}h)`);
   console.log(`    Local: ${startState.hour}:00 (${startState.isDaylightSaving ? 'EDT (UTC-4)' : 'EST (UTC-5)'}) → ${endState.hour}:00`);
 });
 console.log();
 
 // 4. Disambiguation: Select ONLY the Daylight Saving occurrence
-const edtOnly = ChronoFlux.resolve({
+const edtOnly = Time.resolve({
   place: nyc,
   within: window,
   where: Conditions.and(

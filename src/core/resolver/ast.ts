@@ -69,7 +69,7 @@ export type ConditionAST = AtomicConditionNode | LogicalConditionNode;
 
 /**
  * Continuous Scalar Solar Semantics:
- * Isolated single-instant points have measure zero and zero duration. Under ChronoFlux's
+ * Isolated single-instant points have measure zero and zero duration. Under TIME 2.0's
  * half-open interval contract [start, end) where start < end, zero-duration instants cannot
  * form valid non-empty intervals.
  *

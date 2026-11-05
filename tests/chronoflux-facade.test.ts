@@ -7,60 +7,64 @@ import {
   IntervalSet,
   Place,
 } from '../src/core/index.js';
-import { ChronoFlux } from '../src/index.js';
+import { Time, ChronoFlux } from '../src/index.js';
 
-describe('ChronoFlux Public Facade & Uncovered Edge Paths', () => {
-  describe('ChronoFlux Facade Methods', () => {
+describe('Time and ChronoFlux Public Facade & Uncovered Edge Paths', () => {
+  describe('Time Facade Methods', () => {
+    it('verifies ChronoFlux is an exact alias of Time', () => {
+      expect(ChronoFlux).toBe(Time);
+    });
+
     it('creates Instant via now() and instant()', () => {
-      const now = ChronoFlux.now();
+      const now = Time.now();
       expect(now).toBeInstanceOf(Instant);
 
-      const fromBigInt = ChronoFlux.instant(1000n);
+      const fromBigInt = Time.instant(1000n);
       expect(fromBigInt.epochNanoseconds).toBe(1000n);
 
-      const fromMs = ChronoFlux.instant(500);
+      const fromMs = Time.instant(500);
       expect(fromMs.epochNanoseconds).toBe(500_000_000n);
 
       const date = new Date(1730550000000);
-      const fromDate = ChronoFlux.instant(date);
+      const fromDate = Time.instant(date);
       expect(fromDate.toEpochMilliseconds()).toBe(1730550000000);
 
-      const fromIso = ChronoFlux.instant('2026-11-02T12:00:00.000Z');
+      const fromIso = Time.instant('2026-11-02T12:00:00.000Z');
       expect(fromIso.toISOString()).toBe('2026-11-02T12:00:00.000Z');
 
-      expect(() => ChronoFlux.instant(null as any)).toThrow(TypeError);
+      expect(() => Time.instant(null as any)).toThrow(TypeError);
     });
 
     it('creates Durations via duration namespace', () => {
-      expect(ChronoFlux.duration.nanoseconds(10).nanoseconds).toBe(10n);
-      expect(ChronoFlux.duration.microseconds(10).nanoseconds).toBe(10_000n);
-      expect(ChronoFlux.duration.milliseconds(10).nanoseconds).toBe(10_000_000n);
-      expect(ChronoFlux.duration.seconds(10).nanoseconds).toBe(10_000_000_000n);
-      expect(ChronoFlux.duration.minutes(10).nanoseconds).toBe(600_000_000_000n);
-      expect(ChronoFlux.duration.hours(10).nanoseconds).toBe(36_000_000_000_000n);
-      expect(ChronoFlux.duration.days(1).nanoseconds).toBe(86_400_000_000_000n);
-      expect(ChronoFlux.duration.zero().isZero()).toBe(true);
-      expect(ChronoFlux.duration.of({ seconds: 5, milliseconds: 500 }).nanoseconds).toBe(5_500_000_000n);
+      expect(Time.duration.nanoseconds(10).nanoseconds).toBe(10n);
+      expect(Time.duration.microseconds(10).nanoseconds).toBe(10_000n);
+      expect(Time.duration.milliseconds(10).nanoseconds).toBe(10_000_000n);
+      expect(Time.duration.seconds(10).nanoseconds).toBe(10_000_000_000n);
+      expect(Time.duration.minutes(10).nanoseconds).toBe(600_000_000_000n);
+      expect(Time.duration.hours(10).nanoseconds).toBe(36_000_000_000_000n);
+      expect(Time.duration.days(1).nanoseconds).toBe(86_400_000_000_000n);
+      expect(Time.duration.zero().isZero()).toBe(true);
+      expect(Time.duration.of({ seconds: 5, milliseconds: 500 }).nanoseconds).toBe(5_500_000_000n);
     });
 
     it('creates Place via place()', () => {
-      const p = ChronoFlux.place({ latitude: 12.34, longitude: 56.78 });
+      const p = Time.place({ latitude: 12.34, longitude: 56.78 });
       expect(p).toBeInstanceOf(Place);
     });
 
     it('creates Interval and IntervalSet via facade', () => {
-      const i1 = ChronoFlux.instant(0n);
-      const i2 = ChronoFlux.instant(1000n);
-      const iv = ChronoFlux.interval(i1, i2);
+      const i1 = Time.instant(0n);
+      const i2 = Time.instant(1000n);
+      const iv = Time.interval(i1, i2);
       expect(iv).toBeInstanceOf(Interval);
 
-      const emptySet = ChronoFlux.intervalSet.empty();
+      const emptySet = Time.intervalSet.empty();
       expect(emptySet.isEmpty()).toBe(true);
 
-      const setFromList = ChronoFlux.intervalSet.from([iv]);
+      const setFromList = Time.intervalSet.from([iv]);
       expect(setFromList.count()).toBe(1);
 
-      const setOf = ChronoFlux.intervalSet.of(iv);
+      const setOf = Time.intervalSet.of(iv);
       expect(setOf.count()).toBe(1);
     });
   });

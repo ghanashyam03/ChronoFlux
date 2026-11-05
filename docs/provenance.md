@@ -1,6 +1,6 @@
 # Resolution Reports & Mathematical Provenance
 
-Every call to `ChronoFlux.resolve()` generates a comprehensive `ResolutionReport` documenting how and why every boundary instant was chosen.
+Every call to `Time.resolve()` generates a comprehensive `ResolutionReport` documenting how and why every boundary instant was chosen.
 
 ---
 
@@ -87,18 +87,18 @@ export interface BoundaryExplanation {
 ## 3. Example: Inspecting Boundary Provenance
 
 ```typescript
-import { ChronoFlux, Conditions, Instant, Duration } from '@chronoflux/core';
+import { Time, Conditions, Instant, Duration } from 'time-2.0';
 
-const place = ChronoFlux.place({
+const place = Time.place({
   latitude: 37.7749,
   longitude: -122.4194,
   timeZoneId: 'America/Los_Angeles',
 });
 
 const t0 = Instant.fromJSON('2026-06-21T07:00:00.000Z');
-const window = ChronoFlux.interval(t0, t0.add(Duration.fromDays(1)));
+const window = Time.interval(t0, t0.add(Duration.fromDays(1)));
 
-const result = ChronoFlux.resolve({
+const result = Time.resolve({
   place,
   within: window,
   where: Conditions.and(

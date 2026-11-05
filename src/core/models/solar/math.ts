@@ -69,7 +69,7 @@ export function radToDeg(radians: number): number {
 }
 
 /**
- * Converts a ChronoFlux Instant to a fractional Julian Day (UT).
+ * Converts a TIME 2.0 Instant to a fractional Julian Day (UT).
  * Epoch 1970-01-01T00:00:00Z corresponds to JD 2440587.5.
  */
 export function instantToJulianDay(instant: Instant): number {
@@ -86,7 +86,7 @@ export function julianDayToJulianCentury(jd: number): number {
 }
 
 /**
- * Converts a ChronoFlux Instant to Julian Century (T_TT) on the Terrestrial Time scale
+ * Converts a TIME 2.0 Instant to Julian Century (T_TT) on the Terrestrial Time scale
  * using the active astronomical timescale provider:
  * T_TT = (JD_UTC + (Delta T + DUT1) / 86400.0 - 2451545.0) / 36525.0.
  */

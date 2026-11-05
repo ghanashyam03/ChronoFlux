@@ -1,0 +1,633 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* TIME 2.0 Visual Diagnostic Console — Design System */
+
+:root {
+  --bg-space: #080b11;
+  --surface-primary: #0f1420;
+  --surface-secondary: #161e31;
+  --surface-tertiary: #1e293b;
+  --border-color: #232f4a;
+  --border-subtle: #1a2336;
+  --border-bright: #3b82f6;
+
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  --solar-daylight: #fbbf24;
+  --solar-apparent: #f59e0b;
+  --solar-geometric: #94a3b8;
+  --civil-twilight: #6366f1;
+  --nautical-twilight: #3b82f6;
+  --astronomical-twilight: #1e3a8a;
+  --night-obsidian: #0a0d18;
+
+  --accent-cyan: #38bdf8;
+  --accent-emerald: #10b981;
+  --accent-rose: #f43f5e;
+  --accent-amber: #f59e0b;
+
+  --font-mono: 'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  color-scheme: dark;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-space);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* App Container */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* Header & Global Temporal Controller */
+.header-bar {
+  background: var(--surface-primary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 12px 24px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.brand-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f59e0b 0%, #3b82f6 100%);
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+}
+
+.brand-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.brand-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.playback-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-secondary);
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.btn-icon:hover {
+  background: var(--surface-tertiary);
+  color: var(--text-primary);
+}
+
+.btn-icon.active {
+  background: var(--accent-cyan);
+  color: #000;
+}
+
+.btn-primary-action {
+  background: linear-gradient(135deg, var(--solar-daylight) 0%, var(--solar-apparent) 100%);
+  color: #000;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: opacity 0.15s ease;
+}
+
+.btn-primary-action:hover {
+  opacity: 0.9;
+}
+
+.speed-select, .preset-select, .window-select {
+  background: var(--surface-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.speed-select:focus, .preset-select:focus, .window-select:focus {
+  border-color: var(--accent-cyan);
+}
+
+.temporal-readout-pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.temporal-utc-time {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.temporal-civil-time {
+  color: var(--accent-cyan);
+}
+
+/* Main Dashboard Grid */
+.dashboard-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 20px;
+  padding: 20px 24px;
+}
+
+@media (max-width: 1200px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.primary-column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.secondary-column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Card Panel Containers */
+.diagnostic-panel {
+  background: var(--surface-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.panel-header {
+  padding: 12px 16px;
+  background: var(--surface-secondary);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.panel-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.panel-body {
+  padding: 16px;
+  flex: 1;
+}
+
+/* Solar Curve Chart */
+.chart-container {
+  position: relative;
+  width: 100%;
+  height: 280px;
+}
+
+.chart-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+/* 3D Planetary Globe */
+.globe-container {
+  position: relative;
+  width: 100%;
+  height: 340px;
+  background: radial-gradient(circle at center, #0e1526 0%, #080b11 100%);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.globe-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.globe-overlay-info {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: rgba(15, 20, 32, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.subsolar-tag {
+  color: var(--solar-daylight);
+  font-weight: 600;
+}
+
+.observer-tag {
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
+/* Spacetime Ribbon */
+.ribbon-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ribbon-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 140px;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.ribbon-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ribbon-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ribbon-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.ribbon-timeline {
+  position: relative;
+  height: 28px;
+  background: var(--bg-space);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+
+.ribbon-cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 6px var(--accent-cyan);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.ribbon-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.badge-pill {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* State Readout Metrics Card */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.metric-box {
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metric-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.metric-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+/* Query Console */
+.query-builder-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.query-presets-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preset-chip {
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.preset-chip:hover {
+  background: var(--surface-tertiary);
+  color: var(--text-primary);
+  border-color: var(--accent-cyan);
+}
+
+.preset-chip.active {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
+.ast-preview-box {
+  background: var(--bg-space);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-cyan);
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.interval-results-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.interval-summary-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--surface-secondary);
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  border: 1px solid var(--border-color);
+}
+
+.intervals-timeline-viz {
+  position: relative;
+  height: 48px;
+  background: var(--bg-space);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.interval-bar-segment {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+  border: 1px solid #34d399;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: transform 0.1s ease, filter 0.15s ease;
+}
+
+.interval-bar-segment:hover {
+  filter: brightness(1.2);
+  transform: scaleY(1.1);
+  z-index: 5;
+}
+
+.interval-bar-segment.selected {
+  border-color: #fff;
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.6);
+}
+
+/* Provenance Card */
+.provenance-card {
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.provenance-row {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 4px;
+}
+
+.provenance-label {
+  color: var(--text-muted);
+}
+
+.provenance-value {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+/* Allen Relationship Modal / Box */
+.allen-inspector-box {
+  background: var(--surface-tertiary);
+  border: 1px solid var(--border-bright);
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.allen-title {
+  font-weight: 600;
+  color: var(--accent-cyan);
+  font-size: 12px;
+}
+
+.allen-description {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Utility classes */
+.mono {
+  font-family: var(--font-mono);
+}
+
+.text-gold {
+  color: var(--solar-daylight);
+}
+
+.text-cyan {
+  color: var(--accent-cyan);
+}
+
+.text-muted {
+  color: var(--text-muted);
+}

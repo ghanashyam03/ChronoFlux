@@ -1,6 +1,6 @@
 /**
  * @file numeric.ts
- * Exact numerical input validation, safe integer checking, and fractional-unit rounding for ChronoFlux.
+ * Exact numerical input validation, safe integer checking, and fractional-unit rounding for TIME 2.0.
  */
 
 import { LeapSecondPolicy, RoundingMode } from './types.js';

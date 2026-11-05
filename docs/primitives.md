@@ -1,6 +1,6 @@
 # Mathematical Temporal Primitives
 
-ChronoFlux models time as continuous, high-precision physical intervals rather than scalar timestamps or lossy floating-point numbers.
+TIME 2.0 models time as continuous, high-precision physical intervals rather than scalar timestamps or lossy floating-point numbers.
 
 ---
 
@@ -16,7 +16,7 @@ An `Instant` represents an immutable point on the physical timeline measured in 
 ### Usage
 
 ```typescript
-import { Instant } from '@chronoflux/core';
+import { Instant } from 'time-2.0';
 
 // From current wall-clock
 const now = Instant.now();
@@ -51,7 +51,7 @@ A `Duration` represents an immutable signed elapsed duration between two instant
 ### Usage
 
 ```typescript
-import { Duration } from '@chronoflux/core';
+import { Duration } from 'time-2.0';
 
 const d1 = Duration.fromHours(3);
 const d2 = Duration.fromMinutes(45);
@@ -80,7 +80,7 @@ An immutable geographical location on the Earth's surface defined on the WGS84 r
 ### Usage
 
 ```typescript
-import { Place } from '@chronoflux/core';
+import { Place } from 'time-2.0';
 
 const observatory = new Place({
   latitude: 28.2997,
@@ -102,7 +102,7 @@ Half-open intervals prevent off-by-one boundary collisions and guarantee that co
 $$[a, b) \cup [b, c) = [a, c)$$
 
 ### Allen's 13 Interval Relationships
-ChronoFlux provides native computation of James F. Allen's (1983) 13 mutually exclusive interval relationships:
+TIME 2.0 provides native computation of James F. Allen's (1983) 13 mutually exclusive interval relationships:
 - `before` / `after`
 - `meets` / `metBy`
 - `overlaps` / `overlappedBy`
@@ -112,13 +112,13 @@ ChronoFlux provides native computation of James F. Allen's (1983) 13 mutually ex
 - `equals`
 
 ```typescript
-import { Interval, Instant } from '@chronoflux/core';
+import { Interval, Instant } from 'time-2.0';
 
 const a = new Interval(Instant.fromJSON('2026-06-21T09:00:00Z'), Instant.fromJSON('2026-06-21T12:00:00Z'));
 const b = new Interval(Instant.fromJSON('2026-06-21T12:00:00Z'), Instant.fromJSON('2026-06-21T15:00:00Z'));
 
-console.log(a.relate(b)); // 'meets'
-console.log(b.relate(a)); // 'metBy'
+console.log(a.relationTo(b)); // 'meets'
+console.log(b.relationTo(a)); // 'metBy'
 console.log(a.intersection(b)); // null (half-open, no overlap at the single instant)
 ```
 
@@ -135,7 +135,7 @@ An `IntervalSet` is an immutable, canonical collection of mutually disjoint, non
 - **Complement ($W \setminus S$)**: Inverts an interval set relative to a bounding search window $W$.
 
 ```typescript
-import { IntervalSet, Interval, Instant } from '@chronoflux/core';
+import { IntervalSet, Interval, Instant } from 'time-2.0';
 
 const set1 = IntervalSet.from([
   new Interval(Instant.fromJSON('2026-06-21T09:00:00Z'), Instant.fromJSON('2026-06-21T12:00:00Z')),

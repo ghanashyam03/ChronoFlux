@@ -7,7 +7,7 @@ import { Duration } from '../../primitives/duration.js';
 import { Instant } from '../../primitives/instant.js';
 import { Place } from '../../primitives/place.js';
 import { ModelMetadata, TemporalModel } from '../model.js';
-import { getFormatter, safeDateUtc, resolveCivilDateTimeToInstant } from './disambiguation.js';
+import { getFormatter, safeDateUtc, parseYearFromParts, resolveCivilDateTimeToInstant } from './disambiguation.js';
 import { CivilDateTimeInput, CivilState, CivilTimeProvenance, DstConfidence, TimeZoneLookupProvider } from './types.js';
 
 /**
@@ -75,7 +75,7 @@ function extractLocalParts(epochMs: number, timeZoneId: string): LocalParts {
     formatter.formatToParts(new Date(epochMs)).map((p) => [p.type, p.value])
   );
 
-  const year = Number(parts['year']);
+  const year = parseYearFromParts(parts);
   const month = Number(parts['month']);
   const day = Number(parts['day']);
   const hour = Number(parts['hour']);

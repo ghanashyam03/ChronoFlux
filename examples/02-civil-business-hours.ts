@@ -9,10 +9,10 @@
  * - Exact half-open [09:00, 17:00) interval boundaries
  */
 
-import { ChronoFlux, Conditions, Instant, Duration } from '../src/index.js';
+import { Time, Conditions, Instant, Duration } from '../src/index.js';
 
 // 1. Observer: London, United Kingdom
-const london = ChronoFlux.place({
+const london = Time.place({
   latitude: 51.5074,
   longitude: -0.1278,
   timeZoneId: 'Europe/London',
@@ -20,7 +20,7 @@ const london = ChronoFlux.place({
 
 // 2. Search window: 1 full calendar week (Monday to Sunday in June 2026)
 const start = Instant.fromJSON('2026-06-15T00:00:00.000Z'); // Monday 01:00 BST
-const window = ChronoFlux.interval(start, start.add(Duration.fromDays(7)));
+const window = Time.interval(start, start.add(Duration.fromDays(7)));
 
 console.log('=== Example 2: Resolving Business Hours (09:00 - 17:00 Weekdays) ===');
 console.log(`Observer: London (${london.timeZoneId})`);
@@ -33,7 +33,7 @@ const businessHours = Conditions.and(
 );
 
 // 4. Resolve intervals
-const result = ChronoFlux.resolve({
+const result = Time.resolve({
   place: london,
   within: window,
   where: businessHours,
@@ -43,8 +43,8 @@ const result = ChronoFlux.resolve({
 console.log(`Found ${result.intervals.intervals.length} business shifts (Monday - Friday):\n`);
 
 result.intervals.intervals.forEach((iv, idx) => {
-  const localStart = ChronoFlux.civil.evaluate(iv.start, london);
-  const localEnd = ChronoFlux.civil.evaluate(iv.end, london);
+  const localStart = Time.civil.evaluate(iv.start, london);
+  const localEnd = Time.civil.evaluate(iv.end, london);
   const dateStr = `${localStart.year}-${localStart.month.toString().padStart(2, '0')}-${localStart.day.toString().padStart(2, '0')}`;
   const startStr = `${localStart.hour.toString().padStart(2, '0')}:${localStart.minute.toString().padStart(2, '0')}`;
   const endStr = `${localEnd.hour.toString().padStart(2, '0')}:${localEnd.minute.toString().padStart(2, '0')}`;

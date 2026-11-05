@@ -2,7 +2,7 @@
  * @file solver-civil.ts
  * Discrete civil time interval engine.
  * Iterates calendar days within the search window in the target IANA timezone
- * and synthesizes exact half-open intervals using verified ChronoFlux.civil.resolve()
+ * and synthesizes exact half-open intervals using verified Time.civil.resolve()
  * with Daylight Saving Time (DST) disambiguation.
  */
 

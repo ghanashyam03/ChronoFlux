@@ -1,7 +1,7 @@
 {
-  "name": "@chronoflux/core",
+  "name": "time-2.0",
   "version": "0.1.0",
-  "description": "Universal temporal foundation and condition-state engine",
+  "description": "TIME 2.0: Universal temporal engine, solar ephemeris, civil calendar, and condition-state resolver",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -32,24 +32,46 @@
     "prepack": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "dev:visualizer": "vite --config src/visualizer/vite.config.ts",
+    "build:visualizer": "vite build --config src/visualizer/vite.config.ts",
+    "preview:visualizer": "vite preview --config src/visualizer/vite.config.ts --port 4173",
+    "typecheck:visualizer": "tsc --noEmit -p tsconfig.visualizer.json"
   },
   "keywords": [
-    "temporal",
     "time",
+    "time-2.0",
+    "temporal",
     "instant",
     "duration",
+    "solar",
+    "ephemeris",
+    "civil-time",
+    "timezone",
+    "dst",
     "allen-interval-algebra",
     "interval-set",
-    "chronoflux"
+    "condition-resolver"
   ],
-  "author": "ChronoFlux Contributors",
+  "author": "TIME 2.0 Contributors",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@types/three": "^0.187.0",
+    "@vitejs/plugin-react": "^4.7.0",
     "@vitest/coverage-v8": "^2.1.9",
+    "autoprefixer": "^10.6.2",
     "fast-check": "^3.23.2",
+    "lucide-react": "^1.67.0",
+    "postcss": "^8.5.32",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.19",
+    "three": "^0.187.0",
     "typescript": "^5.6.3",
+    "vite": "^5.4.21",
     "vitest": "^2.1.4"
   }
 }

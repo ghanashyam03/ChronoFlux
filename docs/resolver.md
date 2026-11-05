@@ -1,6 +1,6 @@
 # Temporal Condition Resolver
 
-The ChronoFlux Resolver is a hybrid continuous/discrete temporal constraint satisfaction engine. It compiles declarative conditions into verified continuous half-open interval sets $[t_{\text{start}}, t_{\text{end}})$.
+The TIME 2.0 Resolver is a hybrid continuous/discrete temporal constraint satisfaction engine. It compiles declarative conditions into verified continuous half-open interval sets $[t_{\text{start}}, t_{\text{end}})$.
 
 ---
 
@@ -32,10 +32,10 @@ Queries are represented as pure, JSON-serializable Abstract Syntax Tree (AST) no
 
 ## 2. Fluent Builder (`Conditions`)
 
-ChronoFlux provides a strongly typed fluent builder `Conditions`:
+TIME 2.0 provides a strongly typed fluent builder `Conditions`:
 
 ```typescript
-import { Conditions } from '@chronoflux/core';
+import { Conditions } from 'time-2.0';
 
 // 1. Solar angle conditions
 const daylight = Conditions.solar.elevation.gte(10); // elevation >= 10°
@@ -58,7 +58,7 @@ const notDst = Conditions.not(Conditions.civil.isDaylightSaving.eq(true));
 
 ## 3. Continuous Solar Solver Mechanics
 
-Solar elevation and azimuth are continuous functions of physical time $f(t)$. The ChronoFlux solar solver:
+Solar elevation and azimuth are continuous functions of physical time $f(t)$. The TIME 2.0 solar solver:
 1. **Partitions Diurnal Cycles**: Splits each diurnal cycle into strictly monotonic ascending (midnight $\to$ noon) and descending (noon $\to$ midnight) branches using exact transit extrema.
 2. **Bracketed Brent-Dekker Root Solving**: Finds the exact crossing instant $t^*$ where:
    $$h(t^*) - \theta = 0$$
@@ -94,12 +94,12 @@ When resolving queries, specify how candidate intervals are selected:
 - `'longest'`: Returns the interval with the greatest duration.
 
 ```typescript
-import { ChronoFlux, Conditions, Instant, Duration } from '@chronoflux/core';
+import { Time, Conditions, Instant, Duration } from 'time-2.0';
 
-const place = ChronoFlux.place({ latitude: 48.8566, longitude: 2.3522, timeZoneId: 'Europe/Paris' });
-const searchWindow = ChronoFlux.interval(ChronoFlux.now(), ChronoFlux.now().add(Duration.fromDays(7)));
+const place = Time.place({ latitude: 48.8566, longitude: 2.3522, timeZoneId: 'Europe/Paris' });
+const searchWindow = Time.interval(Time.now(), Time.now().add(Duration.fromDays(7)));
 
-const result = ChronoFlux.resolve({
+const result = Time.resolve({
   place,
   within: searchWindow,
   where: Conditions.and(

@@ -9,10 +9,10 @@
  * - Inspecting boundary residuals and duration of daylight windows
  */
 
-import { ChronoFlux, Conditions, Instant, Duration } from '../src/index.js';
+import { Time, Conditions, Instant, Duration } from '../src/index.js';
 
 // 1. Observer: San Francisco, California
-const sf = ChronoFlux.place({
+const sf = Time.place({
   latitude: 37.7749,
   longitude: -122.4194,
   timeZoneId: 'America/Los_Angeles',
@@ -20,7 +20,7 @@ const sf = ChronoFlux.place({
 
 // 2. Search window: 3 days around the summer solstice 2026
 const start = Instant.fromJSON('2026-06-20T07:00:00.000Z');
-const window = ChronoFlux.interval(start, start.add(Duration.fromDays(3)));
+const window = Time.interval(start, start.add(Duration.fromDays(3)));
 
 console.log('=== Example 1: Resolving Daylight Windows (elevation >= 10°) ===');
 console.log(`Observer: San Francisco (${sf.latitude}°, ${sf.longitude}°)`);
@@ -30,7 +30,7 @@ console.log(`Window:   ${window.start.toISOString()} → ${window.end.toISOStrin
 const daylight = Conditions.solar.elevation.gte(10);
 
 // 4. Resolve continuous intervals
-const result = ChronoFlux.resolve({
+const result = Time.resolve({
   place: sf,
   within: window,
   where: daylight,
@@ -40,8 +40,8 @@ const result = ChronoFlux.resolve({
 console.log(`Resolved ${result.intervals.intervals.length} daylight intervals in ${result.report.executionTimeMs.toFixed(2)} ms:\n`);
 
 result.intervals.intervals.forEach((iv, idx) => {
-  const localStart = ChronoFlux.civil.evaluate(iv.start, sf);
-  const localEnd = ChronoFlux.civil.evaluate(iv.end, sf);
+  const localStart = Time.civil.evaluate(iv.start, sf);
+  const localEnd = Time.civil.evaluate(iv.end, sf);
   const startStr = `${localStart.hour.toString().padStart(2, '0')}:${localStart.minute.toString().padStart(2, '0')}`;
   const endStr = `${localEnd.hour.toString().padStart(2, '0')}:${localEnd.minute.toString().padStart(2, '0')}`;
 

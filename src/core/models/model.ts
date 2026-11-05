@@ -35,7 +35,7 @@ export interface ModelAccuracyProfile {
 }
 
 /**
- * Standardized metadata for all ChronoFlux temporal models.
+ * Standardized metadata for all TIME 2.0 temporal models.
  */
 export interface ModelMetadata {
   /**
@@ -68,7 +68,7 @@ export interface ModelMetadata {
 }
 
 /**
- * Universal interface for all domain temporal models in ChronoFlux.
+ * Universal interface for all domain temporal models in TIME 2.0.
  * A TemporalModel evaluates continuous or civil state at an Instant and Place.
  */
 export interface TemporalModel<TState> {

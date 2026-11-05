@@ -450,9 +450,9 @@ export class Instant {
    * Supports UTC ('Z') as well as arbitrary offset representations ('+05:30', '-08:00').
    *
    * Leap-Second Policy:
-   * ChronoFlux operates on a leap-second-free Unix epoch timeline (86,400 SI seconds per day).
+   * TIME 2.0 operates on a leap-second-free Unix epoch timeline (86,400 SI seconds per day).
    * - By default (`leapSecondPolicy: 'reject'`), timestamps with second 60 are strictly rejected,
-   *   consistent with ChronoFlux's leap-second-free Unix Instant model.
+   *   consistent with TIME 2.0's leap-second-free Unix Instant model.
    * - Under `leapSecondPolicy: 'compatible'` (or `'clamp'`), second 60 is accepted ONLY on authentic
    *   historical IERS leap second dates at UTC 23:59:60Z and clamped to second 59 per RFC 3339 / POSIX conventions.
    * - Second 60 on invalid leap-second dates or with non-zero UTC offsets is unconditionally rejected.
@@ -539,7 +539,7 @@ export class Instant {
       if (policy === 'reject' || policy === 'strict') {
         throw new RangeError(
           `Second 60 (leap second) is rejected under strict leap second policy: "${isoString}". ` +
-            `ChronoFlux operates on a leap-second-free Unix timeline. Pass { leapSecondPolicy: 'compatible' } for RFC 3339 clamping on historical IERS dates.`
+            `TIME 2.0 operates on a leap-second-free Unix timeline. Pass { leapSecondPolicy: 'compatible' } for RFC 3339 clamping on historical IERS dates.`
         );
       }
 

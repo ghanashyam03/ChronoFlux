@@ -1,6 +1,6 @@
 # Civil Time & IANA Time Zones
 
-The ChronoFlux Civil Model provides deterministic evaluation of human calendar time, IANA timezone rules, UTC offsets, and Daylight Saving Time (DST) disambiguation.
+The TIME 2.0 Civil Model provides deterministic evaluation of human calendar time, IANA timezone rules, UTC offsets, and Daylight Saving Time (DST) disambiguation.
 
 ---
 
@@ -9,16 +9,16 @@ The ChronoFlux Civil Model provides deterministic evaluation of human calendar t
 Evaluating an `Instant` in an IANA timezone yields a comprehensive `CivilState`:
 
 ```typescript
-import { ChronoFlux } from '@chronoflux/core';
+import { Time } from 'time-2.0';
 
-const place = ChronoFlux.place({
+const place = Time.place({
   latitude: 40.7128,
   longitude: -74.006,
   timeZoneId: 'America/New_York',
 });
 
-const now = ChronoFlux.now();
-const civil = ChronoFlux.civil.evaluate(now, place);
+const now = Time.now();
+const civil = Time.civil.evaluate(now, place);
 
 console.log(`${civil.year}-${civil.month}-${civil.day} ${civil.hour}:${civil.minute}:${civil.second}`);
 console.log(`UTC Offset: ${civil.utcOffsetMinutes} minutes (${civil.utcOffset.totalHours}h)`);
@@ -31,7 +31,7 @@ console.log(`DST Active: ${civil.isDaylightSaving} (Confidence: ${civil.dstConfi
 
 During Daylight Saving Time transitions, wall-clock timestamps can become ambiguous (fall-back repeated hour) or non-existent (spring-forward skipped hour).
 
-`ChronoFlux.civil.resolve` (or `disambiguate`) implements the standard TC39 Temporal disambiguation policies:
+`Time.civil.resolve` (or `disambiguate`) implements the standard TC39 Temporal disambiguation policies:
 
 ### Policies
 
@@ -47,10 +47,10 @@ During Daylight Saving Time transitions, wall-clock timestamps can become ambigu
 On November 1, 2026, clocks in `America/New_York` turn back from 02:00 EDT to 01:00 EST. The wall-clock time `01:30` occurs twice:
 
 ```typescript
-import { ChronoFlux } from '@chronoflux/core';
+import { Time } from 'time-2.0';
 
 // 1. Earlier occurrence (EDT, UTC-4)
-const tEarlier = ChronoFlux.civil.resolve({
+const tEarlier = Time.civil.resolve({
   year: 2026,
   month: 11,
   day: 1,
@@ -61,7 +61,7 @@ const tEarlier = ChronoFlux.civil.resolve({
 });
 
 // 2. Later occurrence (EST, UTC-5)
-const tLater = ChronoFlux.civil.resolve({
+const tLater = Time.civil.resolve({
   year: 2026,
   month: 11,
   day: 1,
@@ -80,11 +80,11 @@ console.log(tLater.since(tEarlier).totalHours); // Exactly 1 hour apart!
 
 ## 3. Pluggable Geographic Timezone Lookup
 
-ChronoFlux strictly prohibits silent fallback to UTC when evaluating civil conditions. If a `Place` does not have a static `timeZoneId`, you can register a pluggable geographic lookup provider (e.g. `@photostructure/tz-lookup`, `geo-tz`, or a GIS database):
+TIME 2.0 strictly prohibits silent fallback to UTC when evaluating civil conditions. If a `Place` does not have a static `timeZoneId`, you can register a pluggable geographic lookup provider (e.g. `@photostructure/tz-lookup`, `geo-tz`, or a GIS database):
 
 ```typescript
-import { ChronoFlux } from '@chronoflux/core';
-import type { TimeZoneLookupProvider } from '@chronoflux/core';
+import { Time } from 'time-2.0';
+import type { TimeZoneLookupProvider } from 'time-2.0';
 
 const customProvider: TimeZoneLookupProvider = {
   lookup(latitude: number, longitude: number): string | null {
@@ -96,7 +96,7 @@ const customProvider: TimeZoneLookupProvider = {
   },
 };
 
-ChronoFlux.civil.registerTimeZoneLookupProvider(customProvider);
+Time.civil.registerTimeZoneLookupProvider(customProvider);
 ```
 
 ---
@@ -106,9 +106,9 @@ ChronoFlux.civil.registerTimeZoneLookupProvider(customProvider);
 To inspect the underlying IANA timezone database and Unicode CLDR version of the running Node.js host environment:
 
 ```typescript
-import { ChronoFlux } from '@chronoflux/core';
+import { Time } from 'time-2.0';
 
-const provenance = ChronoFlux.civil.getProvenance();
+const provenance = Time.civil.getProvenance();
 console.log(provenance);
 // {
 //   runtime: 'Node.js v22.0.0',

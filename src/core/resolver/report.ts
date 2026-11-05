@@ -1,6 +1,6 @@
 /**
  * @file report.ts
- * Mathematical provenance and explanation generator for ChronoFlux resolver.
+ * Mathematical provenance and explanation generator for TIME 2.0 resolver.
  * Generates detailed ResolutionReport documenting governing conditions, physical crossing
  * residuals, accuracy bounds, and execution metadata for every resolved boundary.
  */
@@ -61,7 +61,7 @@ export interface IntervalExplanation {
 }
 
 /**
- * Mathematical provenance and execution report returned by ChronoFlux.resolve().
+ * Mathematical provenance and execution report returned by Time.resolve().
  * Details governing conditions, physical crossing residuals, models consulted, and performance.
  */
 export interface ResolutionReport {

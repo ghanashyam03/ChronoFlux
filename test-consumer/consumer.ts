@@ -1,10 +1,11 @@
 /**
  * @file consumer.ts
- * External TypeScript consumer verifying @chronoflux/core type declarations and runtime execution.
+ * External TypeScript consumer verifying time-2.0 (TIME 2.0) type declarations and runtime execution.
  */
 
 import assert from 'node:assert';
-import ChronoFluxDefault, {
+import TimeDefault, {
+  Time,
   ChronoFlux,
   Instant,
   Duration,
@@ -13,7 +14,7 @@ import ChronoFluxDefault, {
   IntervalSet,
   Conditions,
   resolve,
-} from '@chronoflux/core';
+} from 'time-2.0';
 import type {
   ResolutionResult,
   ResolutionReport,
@@ -46,11 +47,13 @@ import type {
   SolarEventInstant,
   SolarTransitionInstant,
   CivilTransitionInfo,
-} from '@chronoflux/core';
+} from 'time-2.0';
 
-console.log('[consumer.ts] Verifying @chronoflux/core TypeScript typings & runtime...');
+console.log('[consumer.ts] Verifying time-2.0 (TIME 2.0) TypeScript typings & runtime...');
 
-// 1. Static Type Checking of Public Root Types
+// 1. Facade and default export identity
+assert.strictEqual(TimeDefault, Time);
+assert.strictEqual(ChronoFlux, Time); // Backwards-compatible alias
 const placeOptions: PlaceOptions = {
   latitude: 51.5074,
   longitude: -0.1278,
@@ -91,11 +94,15 @@ const end = start.add(Duration.fromDays(2));
 const window = new Interval(start, end);
 
 // 3. Solar & Civil Types Verification
-const solState: SolarState = ChronoFlux.solar.evaluate(start, london);
+const solState: SolarState = Time.solar.evaluate(start, london);
 assert.strictEqual(typeof solState.elevationDeg, 'number');
 
-const civState: CivilState = ChronoFlux.civil.evaluate(start, london);
+const civState: CivilState = Time.civil.evaluate(start, london);
 assert.strictEqual(civState.timeZoneId, 'Europe/London');
+
+// Verify backwards-compatible ChronoFlux facade on same methods
+const solStateCompat: SolarState = ChronoFlux.solar.evaluate(start, london);
+assert.strictEqual(solState.elevationDeg, solStateCompat.elevationDeg);
 
 // 4. Condition AST Types Verification
 const elevationNode: AtomicConditionNode = Conditions.solar.elevation.gte(15, 'deg');

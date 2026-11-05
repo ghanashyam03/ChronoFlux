@@ -40,6 +40,7 @@ export function getFormatter(timeZoneId: string): Intl.DateTimeFormat {
       year: 'numeric',
       month: 'numeric',
       day: 'numeric',
+      era: 'short',
       hour: 'numeric',
       minute: 'numeric',
       second: 'numeric',
@@ -52,8 +53,25 @@ export function getFormatter(timeZoneId: string): Intl.DateTimeFormat {
 }
 
 /**
- * Safe UTC timestamp calculator that correctly handles 2-digit years (0-99).
- * Standard Date.UTC treats 0-99 as 1900-1999.
+ * Safely parses the astronomical year from Intl formatToParts parts.
+ * Correctly accounts for BC/BCE eras where 1 BC is astronomical year 0, 2 BC is -1, etc.
+ */
+export function parseYearFromParts(parts: Record<string, string>): number {
+  const rawYear = Number(parts['year']);
+  if (rawYear <= 0) {
+    return rawYear;
+  }
+  const era = parts['era'];
+  if (era && /^(BC|BCE|B\.C\.|B\.C\.E\.)$/i.test(era.trim())) {
+    return 1 - rawYear;
+  }
+  return rawYear;
+}
+
+/**
+ * Safe UTC timestamp calculator that correctly handles 2-digit years (0-99)
+ * and negative years without Date.UTC 1900-offset corruption or leap year roll-overs.
+ * Shifts years in 0..99 by +400 to preserve proleptic Gregorian 400-year leap cycles.
  */
 export function safeDateUtc(
   year: number,
@@ -64,11 +82,12 @@ export function safeDateUtc(
   second: number = 0,
   millisecond: number = 0
 ): number {
-  const date = new Date(Date.UTC(year, monthIndex, day, hour, minute, second, millisecond));
   if (year >= 0 && year <= 99) {
-    date.setUTCFullYear(year);
+    const date = new Date(Date.UTC(year + 400, monthIndex, day, hour, minute, second, millisecond));
+    date.setUTCFullYear(date.getUTCFullYear() - 400);
+    return date.getTime();
   }
-  return date.getTime();
+  return Date.UTC(year, monthIndex, day, hour, minute, second, millisecond);
 }
 
 interface OffsetProbe {
@@ -79,7 +98,7 @@ interface OffsetProbe {
 function getIntlOffsetProbe(date: Date, timeZoneId: string): OffsetProbe {
   const formatter = getFormatter(timeZoneId);
   const parts = Object.fromEntries(formatter.formatToParts(date).map((p) => [p.type, p.value]));
-  const year = Number(parts['year']);
+  const year = parseYearFromParts(parts);
   const month = Number(parts['month']);
   const day = Number(parts['day']);
   const hour = Number(parts['hour']);
